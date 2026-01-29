@@ -7,6 +7,7 @@ Smart IT Copilot is an AI-powered IT support ticket management system with Servi
 - **Dashboard**: Overview of ticket statistics, recent tickets, and ServiceNow connection status
 - **Ticket Management**: Create, view, and update support tickets with AI-powered suggestions
 - **AI Analysis**: Automatic category prediction, priority assessment, and resolution suggestions
+- **AI Troubleshooting Chat**: Interactive chat assistant on ticket detail page providing step-by-step troubleshooting guidance in simple, non-technical language
 - **ServiceNow Integration**: Pull incidents from ServiceNow, create incidents from local tickets, and sync status updates
 
 ## Technology Stack
@@ -88,6 +89,7 @@ To enable ServiceNow integration, set the following environment variables in Rep
 - `POST /api/tickets` - Create new ticket
 - `PATCH /api/tickets/:id` - Update ticket
 - `DELETE /api/tickets/:id` - Delete ticket
+- `POST /api/tickets/:id/chat` - AI troubleshooting chat (SSE streaming response)
 
 ### ServiceNow
 - `GET /api/sn/health` - Check ServiceNow connection status
@@ -101,6 +103,7 @@ To enable ServiceNow integration, set the following environment variables in Rep
 The application runs on port 5000. The workflow `npm run dev` starts both frontend and backend.
 
 ## Recent Changes
+- Added AI Troubleshooting Chat feature on ticket detail page with SSE streaming
 - Initial implementation of Smart IT Copilot with ServiceNow integration
 - Dashboard with ticket statistics and AI insights
 - Ticket CRUD operations with AI-powered suggestions
