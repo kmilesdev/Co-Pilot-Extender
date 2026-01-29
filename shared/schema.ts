@@ -134,11 +134,18 @@ export interface SyncedGroup {
 }
 
 // AI Chat types for ticket troubleshooting
+export interface ChatAttachment {
+  name: string;
+  type: string;
+  dataUrl: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  attachments?: ChatAttachment[];
 }
 
 export interface TroubleshootingRequest {

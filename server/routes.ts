@@ -331,9 +331,9 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Ticket not found" });
       }
 
-      const { message, history = [] } = req.body;
-      if (!message) {
-        return res.status(400).json({ error: "Message is required" });
+      const { message, history = [], attachments = [] } = req.body;
+      if (!message && attachments.length === 0) {
+        return res.status(400).json({ error: "Message or attachments required" });
       }
 
       res.setHeader("Content-Type", "text/event-stream");
@@ -359,20 +359,61 @@ INSTRUCTIONS:
 6. Be encouraging and patient
 7. Keep responses concise but thorough
 
-Remember: The user may not be technical, so explain things in everyday terms.`;
+Remember: The user may not be technical, so explain things in everyday terms.
+${attachments.length > 0 ? "\nThe user has attached files/images. Please analyze them carefully to help troubleshoot their issue." : ""}`;
 
-      const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+      type MessageContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+      
+      const buildMessageContent = (text: string, msgAttachments?: { name: string; type: string; dataUrl: string }[]): MessageContent => {
+        if (!msgAttachments || msgAttachments.length === 0) {
+          return text || "";
+        }
+        
+        const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [];
+        
+        if (text) {
+          content.push({ type: "text", text });
+        }
+        
+        for (const att of msgAttachments) {
+          if (att.type.startsWith("image/")) {
+            content.push({
+              type: "image_url",
+              image_url: { url: att.dataUrl },
+            });
+          } else {
+            // For non-image files, describe them in text
+            const base64Content = att.dataUrl.split(",")[1] || "";
+            try {
+              const decoded = Buffer.from(base64Content, "base64").toString("utf-8");
+              content.push({
+                type: "text",
+                text: `[File: ${att.name}]\n${decoded.slice(0, 5000)}${decoded.length > 5000 ? "...(truncated)" : ""}`,
+              });
+            } catch {
+              content.push({
+                type: "text",
+                text: `[File: ${att.name}] (binary file, cannot display content)`,
+              });
+            }
+          }
+        }
+        
+        return content.length > 0 ? content : text || "";
+      };
+
+      const chatMessages: any[] = [
         { role: "system", content: systemPrompt },
-        ...history.map((msg: { role: string; content: string }) => ({
+        ...history.map((msg: { role: string; content: string; attachments?: { name: string; type: string; dataUrl: string }[] }) => ({
           role: msg.role as "user" | "assistant",
-          content: msg.content,
+          content: buildMessageContent(msg.content, msg.attachments),
         })),
-        { role: "user", content: message },
+        { role: "user", content: buildMessageContent(message || "", attachments) },
       ];
 
       const stream = await openai.chat.completions.create({
         model: "gpt-5-mini",
-        messages: chatMessages,
+        messages: chatMessages as any,
         stream: true,
         max_completion_tokens: 2048,
       });

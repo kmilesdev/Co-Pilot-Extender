@@ -3,8 +3,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { MessageCircle, Send, Loader2, Bot, User, Sparkles } from "lucide-react";
+import { MessageCircle, Send, Loader2, Bot, User, Sparkles, Paperclip, X, Image, FileText } from "lucide-react";
 import type { ChatMessage } from "@shared/schema";
+
+interface Attachment {
+  id: string;
+  name: string;
+  type: string;
+  dataUrl: string;
+  size: number;
+}
 
 interface AIChatProps {
   ticketId: string;
@@ -16,8 +24,10 @@ export function AIChat({ ticketId, ticketSubject }: AIChatProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -31,18 +41,74 @@ export function AIChat({ ticketId, ticketSubject }: AIChatProps) {
     }
   }, [isOpen]);
 
-  const sendMessage = async () => {
-    if (!input.trim() || isLoading) return;
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
 
+    const maxSize = 10 * 1024 * 1024; // 10MB limit
+    const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp", "text/plain"];
+
+    for (const file of Array.from(files)) {
+      if (file.size > maxSize) {
+        alert(`File "${file.name}" is too large. Maximum size is 10MB.`);
+        continue;
+      }
+
+      if (!allowedTypes.includes(file.type)) {
+        alert(`File type "${file.type}" is not supported. Please use images (JPEG, PNG, GIF, WebP) or text files.`);
+        continue;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        setAttachments((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            name: file.name,
+            type: file.type,
+            dataUrl,
+            size: file.size,
+          },
+        ]);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removeAttachment = (id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  };
+
+  const sendMessage = async () => {
+    if ((!input.trim() && attachments.length === 0) || isLoading) return;
+
+    const currentAttachments = [...attachments];
+    const messageContent = input.trim();
+    
     const userMessage: ChatMessage = {
       id: crypto.randomUUID(),
       role: "user",
-      content: input.trim(),
+      content: messageContent || (currentAttachments.length > 0 ? `[Attached ${currentAttachments.length} file(s)]` : ""),
       timestamp: new Date(),
+      attachments: currentAttachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl })),
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+    setAttachments([]);
     setIsLoading(true);
 
     const assistantMessage: ChatMessage = {
@@ -58,12 +124,21 @@ export function AIChat({ ticketId, ticketSubject }: AIChatProps) {
       const history = messages.map((m) => ({
         role: m.role,
         content: m.content,
+        attachments: m.attachments,
       }));
 
       const response = await fetch(`/api/tickets/${ticketId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMessage.content, history }),
+        body: JSON.stringify({ 
+          message: messageContent, 
+          history,
+          attachments: currentAttachments.map(a => ({
+            name: a.name,
+            type: a.type,
+            dataUrl: a.dataUrl,
+          })),
+        }),
       });
 
       if (!response.ok) {
@@ -208,6 +283,25 @@ export function AIChat({ ticketId, ticketSubject }: AIChatProps) {
                   }`}
                   data-testid={`chat-message-${msg.role}`}
                 >
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mb-2">
+                      {msg.attachments.map((att, idx) => (
+                        att.type.startsWith("image/") ? (
+                          <img
+                            key={idx}
+                            src={att.dataUrl}
+                            alt={att.name}
+                            className="max-w-[150px] max-h-[100px] rounded object-cover"
+                          />
+                        ) : (
+                          <div key={idx} className="flex items-center gap-1 text-xs bg-background/20 rounded px-2 py-1">
+                            <FileText className="h-3 w-3" />
+                            {att.name}
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  )}
                   <p className="text-sm whitespace-pre-wrap">{msg.content || (isLoading ? "..." : "")}</p>
                 </div>
                 {msg.role === "user" && (
@@ -220,20 +314,70 @@ export function AIChat({ ticketId, ticketSubject }: AIChatProps) {
           </div>
         </ScrollArea>
         <div className="p-4 border-t">
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3 p-2 bg-muted/50 rounded-lg">
+              {attachments.map((att) => (
+                <div
+                  key={att.id}
+                  className="relative group flex items-center gap-2 bg-background rounded px-2 py-1 text-sm"
+                  data-testid={`attachment-preview-${att.id}`}
+                >
+                  {att.type.startsWith("image/") ? (
+                    <img
+                      src={att.dataUrl}
+                      alt={att.name}
+                      className="w-8 h-8 object-cover rounded"
+                      data-testid={`img-attachment-${att.id}`}
+                    />
+                  ) : (
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <span className="max-w-[100px] truncate text-xs" data-testid={`text-attachment-name-${att.id}`}>{att.name}</span>
+                  <span className="text-xs text-muted-foreground">({formatFileSize(att.size)})</span>
+                  <button
+                    onClick={() => removeAttachment(att.id)}
+                    className="p-0.5 hover:bg-destructive/20 rounded"
+                    data-testid={`button-remove-attachment-${att.id}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.txt"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+              data-testid="input-file-upload"
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading}
+              title="Attach files or images"
+              data-testid="button-attach-file"
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
             <Textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Describe your issue or ask for help..."
+              placeholder="Describe your issue or attach a screenshot..."
               className="min-h-[44px] max-h-32 resize-none"
               disabled={isLoading}
               data-testid="input-chat-message"
             />
             <Button
               onClick={sendMessage}
-              disabled={!input.trim() || isLoading}
+              disabled={(!input.trim() && attachments.length === 0) || isLoading}
               size="icon"
               data-testid="button-send-message"
             >
@@ -245,7 +389,7 @@ export function AIChat({ ticketId, ticketSubject }: AIChatProps) {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground mt-2 text-center">
-            Press Enter to send, Shift+Enter for new line
+            Press Enter to send, Shift+Enter for new line. Attach images or files for better help.
           </p>
         </div>
       </CardContent>
