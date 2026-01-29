@@ -1,0 +1,182 @@
+Extend the existing Smart IT Copilot FastAPI + SQLite + Vanilla JS app by adding ServiceNow Incident integration.
+
+Goals
+
+Pull Incidents from ServiceNow into the dashboard (read-only + optional import into local DB).
+
+Create a ServiceNow Incident from a Copilot ticket (push).
+
+Update an existing ServiceNow Incident when local ticket status changes (push).
+
+Keep credentials secure using environment variables.
+
+ServiceNow Integration Requirements
+Environment Variables (REQUIRED)
+
+Add these to .env.example and read via python-dotenv:
+
+SN_INSTANCE_URL (example: https://dev12345.service-now.com)
+
+SN_AUTH_TYPE (basic or oauth)
+
+If BASIC:
+
+SN_USERNAME
+
+SN_PASSWORD
+
+If OAUTH (preferred if possible):
+
+SN_CLIENT_ID
+
+SN_CLIENT_SECRET
+
+SN_TOKEN_URL (or build from instance)
+
+SN_REFRESH_TOKEN (optional)
+
+Optional:
+
+SN_DEFAULT_ASSIGNMENT_GROUP_SYSID
+
+SN_DEFAULT_CALLER_SYSID
+
+Rules:
+
+Never hardcode secrets.
+
+If env vars are missing, ServiceNow pages should show a friendly “ServiceNow not configured” message.
+
+API Usage (ServiceNow Table API)
+
+Use HTTPS requests to the ServiceNow Table API for the Incident table:
+
+Table: incident
+
+Endpoints (built from instance):
+
+GET {SN_INSTANCE_URL}/api/now/table/incident
+
+GET {SN_INSTANCE_URL}/api/now/table/incident/{sys_id}
+
+POST {SN_INSTANCE_URL}/api/now/table/incident
+
+PATCH {SN_INSTANCE_URL}/api/now/table/incident/{sys_id}
+
+Use sysparm_limit, sysparm_query, sysparm_fields for efficient fetch.
+
+Data Mapping
+
+Map local tickets to ServiceNow incident fields:
+
+Local Ticket → ServiceNow Incident
+
+subject → short_description
+
+description → description (append “AI Suggestions” section)
+
+priority or predicted_priority → priority (map low/medium/high/urgent to SN 4/3/2/1 or similar)
+
+category or predicted_category → category (best effort; fall back to “software” if unknown)
+
+requester_email → caller_id (if you can’t resolve by email, use SN_DEFAULT_CALLER_SYSID if provided)
+
+local ticket id → include in comments or work_notes (e.g., “Copilot Ticket ID: X”)
+
+store returned sys_id and number in local DB
+
+Add these columns to local DB tickets table:
+
+sn_sys_id (nullable)
+
+sn_number (nullable)
+
+sn_last_sync_at (nullable)
+
+sn_sync_status (ok/failed)
+
+sn_last_error (nullable)
+
+New Backend Routes (FastAPI)
+
+Add routes under app/routes/servicenow.py:
+
+GET /api/sn/incidents
+
+Returns latest incidents from ServiceNow (limit default 25)
+
+Query params: limit, query (optional ServiceNow sysparm_query), state (optional)
+
+POST /api/sn/incidents/create-from-ticket/{ticket_id}
+
+Creates a ServiceNow incident using ticket data + AI suggestions
+
+Saves sn_sys_id, sn_number in local DB
+
+PATCH /api/sn/incidents/{sys_id}/sync-ticket/{ticket_id}
+
+Updates a ServiceNow incident with local status + new notes
+
+POST /api/sn/sync/pull
+
+Pull incidents and (optionally) import as local tickets (dedupe by sn_sys_id)
+
+GET /api/sn/health
+
+Checks configuration + connectivity (without exposing secrets)
+
+Frontend UI Updates
+
+Add a “ServiceNow” section in nav:
+
+/servicenow
+
+Show “Connected / Not configured”
+
+Button: “Fetch latest incidents”
+
+Table listing number, short_description, state, priority, updated_on
+
+Click row to open details modal
+
+Ticket Detail page updates:
+
+If no sn_sys_id, show button “Create ServiceNow Incident”
+
+If linked, show SN Number + link to open in ServiceNow, and buttons:
+
+“Sync status to ServiceNow”
+
+“Add work note from AI suggestions”
+
+Auth & Permissions
+
+Only admin and agent can view ServiceNow pages.
+
+Only admin can run bulk pull/import.
+
+Implementation Notes
+
+Create a app/integrations/servicenow_client.py with:
+
+get_incidents(), get_incident(), create_incident(), update_incident()
+
+handles auth mode (basic or oauth)
+
+clean error handling + returns friendly error messages to UI
+
+Add retry/backoff for HTTP 429/5xx (simple is fine).
+
+README Updates
+
+Add a “ServiceNow Setup” section with:
+
+where to find instance URL
+
+how to set env vars in Replit Secrets
+
+recommended auth method
+
+test steps: health endpoint, fetch incidents, create incident from ticket
+
+Now generate the code changes and ensure the app still runs out-of-the-box even when ServiceNow is not configured.
