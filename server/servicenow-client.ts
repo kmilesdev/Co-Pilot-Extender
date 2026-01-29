@@ -1,4 +1,4 @@
-import type { ServiceNowIncident, ServiceNowHealthStatus } from "@shared/schema";
+import type { ServiceNowIncident, ServiceNowHealthStatus, ServiceNowUser, ServiceNowGroup } from "@shared/schema";
 
 interface ServiceNowConfig {
   instanceUrl: string;
@@ -345,6 +345,100 @@ class ServiceNowClient {
       "6": "closed",
     };
     return mapping[state] || "open";
+  }
+
+  async getUsers(options: {
+    limit?: number;
+    activeOnly?: boolean;
+    groupSysId?: string;
+  } = {}): Promise<ServiceNowUser[]> {
+    const params = new URLSearchParams();
+    params.set("sysparm_limit", String(options.limit || 100));
+    params.set(
+      "sysparm_fields",
+      "sys_id,user_name,first_name,last_name,email,title,department,active"
+    );
+    params.set("sysparm_display_value", "false");
+    
+    const queryParts: string[] = [];
+    if (options.activeOnly !== false) {
+      queryParts.push("active=true");
+    }
+    if (queryParts.length > 0) {
+      params.set("sysparm_query", queryParts.join("^"));
+    }
+
+    return this.request<ServiceNowUser[]>(
+      "GET",
+      `/api/now/table/sys_user?${params.toString()}`
+    );
+  }
+
+  async getUser(sysId: string): Promise<ServiceNowUser> {
+    return this.request<ServiceNowUser>(
+      "GET",
+      `/api/now/table/sys_user/${sysId}`
+    );
+  }
+
+  async getGroups(options: {
+    limit?: number;
+    activeOnly?: boolean;
+  } = {}): Promise<ServiceNowGroup[]> {
+    const params = new URLSearchParams();
+    params.set("sysparm_limit", String(options.limit || 100));
+    params.set(
+      "sysparm_fields",
+      "sys_id,name,description,manager,email,active"
+    );
+    params.set("sysparm_display_value", "false");
+    
+    const queryParts: string[] = [];
+    if (options.activeOnly !== false) {
+      queryParts.push("active=true");
+    }
+    queryParts.push("type=");
+    if (queryParts.length > 0) {
+      params.set("sysparm_query", queryParts.join("^"));
+    }
+
+    return this.request<ServiceNowGroup[]>(
+      "GET",
+      `/api/now/table/sys_user_group?${params.toString()}`
+    );
+  }
+
+  async getGroup(sysId: string): Promise<ServiceNowGroup> {
+    return this.request<ServiceNowGroup>(
+      "GET",
+      `/api/now/table/sys_user_group/${sysId}`
+    );
+  }
+
+  async getGroupMembers(groupSysId: string): Promise<ServiceNowUser[]> {
+    const params = new URLSearchParams();
+    params.set("sysparm_limit", "100");
+    params.set("sysparm_fields", "user");
+    params.set("sysparm_query", `group=${groupSysId}`);
+
+    const memberships = await this.request<{ user: string }[]>(
+      "GET",
+      `/api/now/table/sys_user_grmember?${params.toString()}`
+    );
+
+    const users: ServiceNowUser[] = [];
+    for (const membership of memberships) {
+      if (membership.user) {
+        try {
+          const user = await this.getUser(membership.user);
+          users.push(user);
+        } catch {
+          // Skip users that can't be fetched
+        }
+      }
+    }
+
+    return users;
   }
 }
 

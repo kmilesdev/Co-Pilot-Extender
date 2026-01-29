@@ -400,6 +400,130 @@ Remember: The user may not be technical, so explain things in everyday terms.`;
     }
   });
 
+  // =====================
+  // ServiceNow User Sync
+  // =====================
+
+  app.get("/api/sn/users", async (req, res) => {
+    try {
+      const users = await storage.getSyncedUsers();
+      res.json(users);
+    } catch (error) {
+      console.error("Error fetching synced users:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  app.get("/api/sn/groups", async (req, res) => {
+    try {
+      const groups = await storage.getSyncedGroups();
+      res.json(groups);
+    } catch (error) {
+      console.error("Error fetching synced groups:", error);
+      res.status(500).json({ error: "Failed to fetch groups" });
+    }
+  });
+
+  app.post("/api/sn/sync/users", async (req, res) => {
+    try {
+      if (!snClient.isConfigured()) {
+        return res.status(503).json({ 
+          error: "ServiceNow is not configured" 
+        });
+      }
+
+      const snUsers = await snClient.getUsers({ limit: 100, activeOnly: true });
+      const synced: string[] = [];
+
+      for (const snUser of snUsers) {
+        await storage.upsertSyncedUser({
+          snSysId: snUser.sys_id,
+          username: snUser.user_name || "",
+          firstName: snUser.first_name || "",
+          lastName: snUser.last_name || "",
+          email: snUser.email || "",
+          title: snUser.title || "",
+          department: snUser.department || "",
+          active: snUser.active === "true",
+          syncedAt: new Date(),
+        });
+        synced.push(snUser.user_name || snUser.sys_id);
+      }
+
+      const allUsers = await storage.getSyncedUsers();
+
+      res.json({
+        message: `Synced ${synced.length} users from ServiceNow`,
+        count: synced.length,
+        users: allUsers,
+      });
+    } catch (error) {
+      console.error("Error syncing users from ServiceNow:", error);
+      res.status(500).json({ 
+        error: error instanceof Error ? error.message : "Failed to sync users" 
+      });
+    }
+  });
+
+  app.post("/api/sn/sync/groups", async (req, res) => {
+    try {
+      if (!snClient.isConfigured()) {
+        return res.status(503).json({ 
+          error: "ServiceNow is not configured" 
+        });
+      }
+
+      const snGroups = await snClient.getGroups({ limit: 100, activeOnly: true });
+      const synced: string[] = [];
+
+      for (const snGroup of snGroups) {
+        await storage.upsertSyncedGroup({
+          snSysId: snGroup.sys_id,
+          name: snGroup.name || "",
+          description: snGroup.description || "",
+          managerSysId: snGroup.manager || null,
+          email: snGroup.email || "",
+          active: snGroup.active === "true",
+          syncedAt: new Date(),
+        });
+        synced.push(snGroup.name || snGroup.sys_id);
+      }
+
+      const allGroups = await storage.getSyncedGroups();
+
+      res.json({
+        message: `Synced ${synced.length} groups from ServiceNow`,
+        count: synced.length,
+        groups: allGroups,
+      });
+    } catch (error) {
+      console.error("Error syncing groups from ServiceNow:", error);
+      res.status(500).json({ 
+        error: error instanceof Error ? error.message : "Failed to sync groups" 
+      });
+    }
+  });
+
+  app.delete("/api/sn/users", async (req, res) => {
+    try {
+      await storage.clearSyncedUsers();
+      res.json({ message: "All synced users cleared" });
+    } catch (error) {
+      console.error("Error clearing synced users:", error);
+      res.status(500).json({ error: "Failed to clear users" });
+    }
+  });
+
+  app.delete("/api/sn/groups", async (req, res) => {
+    try {
+      await storage.clearSyncedGroups();
+      res.json({ message: "All synced groups cleared" });
+    } catch (error) {
+      console.error("Error clearing synced groups:", error);
+      res.status(500).json({ error: "Failed to clear groups" });
+    }
+  });
+
   return httpServer;
 }
 

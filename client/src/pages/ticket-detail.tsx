@@ -36,7 +36,8 @@ import {
   Loader2,
   Trash2,
 } from "lucide-react";
-import type { Ticket, ServiceNowHealthStatus } from "@shared/schema";
+import type { Ticket, ServiceNowHealthStatus, SyncedUser } from "@shared/schema";
+import { User } from "lucide-react";
 import { AIChat } from "@/components/ai-chat";
 
 const priorityColors = {
@@ -67,6 +68,32 @@ export default function TicketDetailPage() {
 
   const { data: snHealth } = useQuery<ServiceNowHealthStatus>({
     queryKey: ["/api/sn/health"],
+  });
+
+  const { data: syncedUsers } = useQuery<SyncedUser[]>({
+    queryKey: ["/api/sn/users"],
+    enabled: snHealth?.connected === true,
+  });
+
+  const updateAssignmentMutation = useMutation({
+    mutationFn: async (assignedTo: string | null) => {
+      return apiRequest("PATCH", `/api/tickets/${ticketId}`, { assignedTo });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tickets", ticketId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
+      toast({
+        title: "Assignment updated",
+        description: "The ticket has been assigned.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update assignment.",
+        variant: "destructive",
+      });
+    },
   });
 
   const updateStatusMutation = useMutation({
@@ -377,6 +404,45 @@ export default function TicketDetailPage() {
                   Requester
                 </label>
                 <p className="mt-1">{ticket.requesterEmail || "-"}</p>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                  <User className="h-3 w-3" />
+                  Assigned To
+                </label>
+                {syncedUsers && syncedUsers.length > 0 ? (
+                  <Select
+                    value={ticket.assignedTo || "unassigned"}
+                    onValueChange={(value) => 
+                      updateAssignmentMutation.mutate(value === "unassigned" ? null : value)
+                    }
+                    disabled={updateAssignmentMutation.isPending}
+                  >
+                    <SelectTrigger
+                      className="mt-1"
+                      data-testid="select-assigned-to"
+                    >
+                      <SelectValue placeholder="Select agent..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                      {syncedUsers.map((user) => (
+                        <SelectItem key={user.id} value={user.id}>
+                          {user.firstName} {user.lastName}
+                          {user.title && ` - ${user.title}`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {ticket.assignedTo || "Unassigned"}
+                    <span className="block text-xs mt-1">
+                      Sync users from ServiceNow to enable assignment
+                    </span>
+                  </p>
+                )}
               </div>
 
               <div>

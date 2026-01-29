@@ -89,6 +89,50 @@ export interface ServiceNowHealthStatus {
   error: string | null;
 }
 
+export interface ServiceNowUser {
+  sys_id: string;
+  user_name: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  title: string;
+  department: string;
+  active: string;
+}
+
+export interface ServiceNowGroup {
+  sys_id: string;
+  name: string;
+  description: string;
+  manager: string;
+  email: string;
+  active: string;
+}
+
+export interface SyncedUser {
+  id: string;
+  snSysId: string;
+  username: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  title: string;
+  department: string;
+  active: boolean;
+  syncedAt: Date;
+}
+
+export interface SyncedGroup {
+  id: string;
+  snSysId: string;
+  name: string;
+  description: string;
+  managerSysId: string | null;
+  email: string;
+  active: boolean;
+  syncedAt: Date;
+}
+
 // AI Chat types for ticket troubleshooting
 export interface ChatMessage {
   id: string;

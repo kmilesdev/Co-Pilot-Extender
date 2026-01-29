@@ -1,4 +1,4 @@
-import { type User, type InsertUser, type Ticket, type InsertTicket } from "@shared/schema";
+import { type User, type InsertUser, type Ticket, type InsertTicket, type SyncedUser, type SyncedGroup } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -12,15 +12,33 @@ export interface IStorage {
   createTicket(ticket: InsertTicket): Promise<Ticket>;
   updateTicket(id: string, updates: Partial<Ticket>): Promise<Ticket | undefined>;
   deleteTicket(id: string): Promise<boolean>;
+
+  getSyncedUsers(): Promise<SyncedUser[]>;
+  getSyncedUser(id: string): Promise<SyncedUser | undefined>;
+  getSyncedUserBySnSysId(snSysId: string): Promise<SyncedUser | undefined>;
+  upsertSyncedUser(user: Omit<SyncedUser, "id">): Promise<SyncedUser>;
+  deleteSyncedUser(id: string): Promise<boolean>;
+  clearSyncedUsers(): Promise<void>;
+
+  getSyncedGroups(): Promise<SyncedGroup[]>;
+  getSyncedGroup(id: string): Promise<SyncedGroup | undefined>;
+  getSyncedGroupBySnSysId(snSysId: string): Promise<SyncedGroup | undefined>;
+  upsertSyncedGroup(group: Omit<SyncedGroup, "id">): Promise<SyncedGroup>;
+  deleteSyncedGroup(id: string): Promise<boolean>;
+  clearSyncedGroups(): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
   private users: Map<string, User>;
   private tickets: Map<string, Ticket>;
+  private syncedUsers: Map<string, SyncedUser>;
+  private syncedGroups: Map<string, SyncedGroup>;
 
   constructor() {
     this.users = new Map();
     this.tickets = new Map();
+    this.syncedUsers = new Map();
+    this.syncedGroups = new Map();
     
     this.initializeDefaultUser();
     this.initializeSampleTickets();
@@ -191,6 +209,84 @@ export class MemStorage implements IStorage {
 
   async deleteTicket(id: string): Promise<boolean> {
     return this.tickets.delete(id);
+  }
+
+  async getSyncedUsers(): Promise<SyncedUser[]> {
+    return Array.from(this.syncedUsers.values()).sort((a, b) => {
+      const nameA = `${a.lastName} ${a.firstName}`.toLowerCase();
+      const nameB = `${b.lastName} ${b.firstName}`.toLowerCase();
+      return nameA.localeCompare(nameB);
+    });
+  }
+
+  async getSyncedUser(id: string): Promise<SyncedUser | undefined> {
+    return this.syncedUsers.get(id);
+  }
+
+  async getSyncedUserBySnSysId(snSysId: string): Promise<SyncedUser | undefined> {
+    return Array.from(this.syncedUsers.values()).find(
+      (user) => user.snSysId === snSysId
+    );
+  }
+
+  async upsertSyncedUser(userData: Omit<SyncedUser, "id">): Promise<SyncedUser> {
+    const existing = await this.getSyncedUserBySnSysId(userData.snSysId);
+    if (existing) {
+      const updated: SyncedUser = { ...existing, ...userData };
+      this.syncedUsers.set(existing.id, updated);
+      return updated;
+    }
+
+    const id = randomUUID();
+    const user: SyncedUser = { ...userData, id };
+    this.syncedUsers.set(id, user);
+    return user;
+  }
+
+  async deleteSyncedUser(id: string): Promise<boolean> {
+    return this.syncedUsers.delete(id);
+  }
+
+  async clearSyncedUsers(): Promise<void> {
+    this.syncedUsers.clear();
+  }
+
+  async getSyncedGroups(): Promise<SyncedGroup[]> {
+    return Array.from(this.syncedGroups.values()).sort((a, b) => 
+      a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+    );
+  }
+
+  async getSyncedGroup(id: string): Promise<SyncedGroup | undefined> {
+    return this.syncedGroups.get(id);
+  }
+
+  async getSyncedGroupBySnSysId(snSysId: string): Promise<SyncedGroup | undefined> {
+    return Array.from(this.syncedGroups.values()).find(
+      (group) => group.snSysId === snSysId
+    );
+  }
+
+  async upsertSyncedGroup(groupData: Omit<SyncedGroup, "id">): Promise<SyncedGroup> {
+    const existing = await this.getSyncedGroupBySnSysId(groupData.snSysId);
+    if (existing) {
+      const updated: SyncedGroup = { ...existing, ...groupData };
+      this.syncedGroups.set(existing.id, updated);
+      return updated;
+    }
+
+    const id = randomUUID();
+    const group: SyncedGroup = { ...groupData, id };
+    this.syncedGroups.set(id, group);
+    return group;
+  }
+
+  async deleteSyncedGroup(id: string): Promise<boolean> {
+    return this.syncedGroups.delete(id);
+  }
+
+  async clearSyncedGroups(): Promise<void> {
+    this.syncedGroups.clear();
   }
 }
 

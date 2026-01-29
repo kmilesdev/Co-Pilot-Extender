@@ -33,7 +33,9 @@ import {
   ExternalLink,
   Settings,
 } from "lucide-react";
-import type { ServiceNowIncident, ServiceNowHealthStatus } from "@shared/schema";
+import type { ServiceNowIncident, ServiceNowHealthStatus, SyncedUser, SyncedGroup } from "@shared/schema";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Users, Building2 } from "lucide-react";
 
 const stateLabels: Record<string, string> = {
   "1": "New",
@@ -174,6 +176,56 @@ export default function ServiceNowPage() {
       toast({
         title: "Import failed",
         description: error.message || "Failed to import incidents.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const { data: syncedUsers, isLoading: usersLoading, refetch: refetchUsers } = useQuery<SyncedUser[]>({
+    queryKey: ["/api/sn/users"],
+    enabled: health?.connected === true,
+  });
+
+  const { data: syncedGroups, isLoading: groupsLoading, refetch: refetchGroups } = useQuery<SyncedGroup[]>({
+    queryKey: ["/api/sn/groups"],
+    enabled: health?.connected === true,
+  });
+
+  const syncUsersMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/sn/sync/users", {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sn/users"] });
+      toast({
+        title: "Users synced",
+        description: "Users have been synced from ServiceNow.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sync failed",
+        description: error.message || "Failed to sync users.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const syncGroupsMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/sn/sync/groups", {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/sn/groups"] });
+      toast({
+        title: "Groups synced",
+        description: "Assignment groups have been synced from ServiceNow.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Sync failed",
+        description: error.message || "Failed to sync groups.",
         variant: "destructive",
       });
     },
@@ -384,6 +436,186 @@ export default function ServiceNowPage() {
                 </p>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {health?.connected && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                Users & Groups
+              </CardTitle>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => syncUsersMutation.mutate()}
+                  disabled={syncUsersMutation.isPending}
+                  data-testid="button-sync-users"
+                >
+                  {syncUsersMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                  )}
+                  Sync Users
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => syncGroupsMutation.mutate()}
+                  disabled={syncGroupsMutation.isPending}
+                  data-testid="button-sync-groups"
+                >
+                  {syncGroupsMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                  )}
+                  Sync Groups
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue="users">
+              <TabsList className="mb-4">
+                <TabsTrigger value="users" data-testid="tab-users">
+                  <Users className="h-4 w-4 mr-2" />
+                  Users ({syncedUsers?.length || 0})
+                </TabsTrigger>
+                <TabsTrigger value="groups" data-testid="tab-groups">
+                  <Building2 className="h-4 w-4 mr-2" />
+                  Groups ({syncedGroups?.length || 0})
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="users">
+                {usersLoading ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="flex items-center gap-4 p-3">
+                        <Skeleton className="h-10 w-10 rounded-full" />
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-4 w-48" />
+                      </div>
+                    ))}
+                  </div>
+                ) : syncedUsers && syncedUsers.length > 0 ? (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Username</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Title</TableHead>
+                          <TableHead>Department</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {syncedUsers.map((user) => (
+                          <TableRow key={user.id} data-testid={`user-row-${user.id}`}>
+                            <TableCell className="font-medium">
+                              {user.firstName} {user.lastName}
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">
+                              {user.username}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">
+                              {user.email || "-"}
+                            </TableCell>
+                            <TableCell>{user.title || "-"}</TableCell>
+                            <TableCell>{user.department || "-"}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="secondary"
+                                className={
+                                  user.active
+                                    ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+                                    : "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400"
+                                }
+                              >
+                                {user.active ? "Active" : "Inactive"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <Users className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                    <h3 className="text-lg font-medium">No users synced</h3>
+                    <p className="text-muted-foreground mt-1">
+                      Click "Sync Users" to import users from ServiceNow.
+                    </p>
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="groups">
+                {groupsLoading ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <div key={i} className="flex items-center gap-4 p-3">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-4 w-64" />
+                      </div>
+                    ))}
+                  </div>
+                ) : syncedGroups && syncedGroups.length > 0 ? (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Description</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {syncedGroups.map((group) => (
+                          <TableRow key={group.id} data-testid={`group-row-${group.id}`}>
+                            <TableCell className="font-medium">{group.name}</TableCell>
+                            <TableCell className="text-muted-foreground max-w-xs truncate">
+                              {group.description || "-"}
+                            </TableCell>
+                            <TableCell>{group.email || "-"}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="secondary"
+                                className={
+                                  group.active
+                                    ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400"
+                                    : "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400"
+                                }
+                              >
+                                {group.active ? "Active" : "Inactive"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <Building2 className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                    <h3 className="text-lg font-medium">No groups synced</h3>
+                    <p className="text-muted-foreground mt-1">
+                      Click "Sync Groups" to import assignment groups from ServiceNow.
+                    </p>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       )}
