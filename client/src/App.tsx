@@ -13,6 +13,7 @@ import TicketsPage from "@/pages/tickets";
 import TicketDetailPage from "@/pages/ticket-detail";
 import NewTicketPage from "@/pages/ticket-new";
 import ServiceNowPage from "@/pages/servicenow";
+import HelpPage from "@/pages/help";
 
 function Router() {
   return (
@@ -22,6 +23,7 @@ function Router() {
       <Route path="/tickets/new" component={NewTicketPage} />
       <Route path="/tickets/:id" component={TicketDetailPage} />
       <Route path="/servicenow" component={ServiceNowPage} />
+      <Route path="/help" component={HelpPage} />
       <Route component={NotFound} />
     </Switch>
   );
