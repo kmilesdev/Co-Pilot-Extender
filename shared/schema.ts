@@ -88,3 +88,17 @@ export interface ServiceNowHealthStatus {
   instanceUrl: string | null;
   error: string | null;
 }
+
+// AI Chat types for ticket troubleshooting
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+}
+
+export interface TroubleshootingRequest {
+  ticketId: string;
+  message: string;
+  history: { role: "user" | "assistant"; content: string }[];
+}

@@ -4,6 +4,12 @@ import { storage } from "./storage";
 import { snClient } from "./servicenow-client";
 import { ticketFormSchema } from "@shared/schema";
 import { z } from "zod";
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
 
 export async function registerRoutes(
   httpServer: Server,
@@ -311,6 +317,86 @@ export async function registerRoutes(
       res.status(500).json({ 
         error: error instanceof Error ? error.message : "Failed to pull incidents" 
       });
+    }
+  });
+
+  // =====================
+  // AI Troubleshooting Chat
+  // =====================
+
+  app.post("/api/tickets/:id/chat", async (req, res) => {
+    try {
+      const ticket = await storage.getTicket(req.params.id);
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+
+      const { message, history = [] } = req.body;
+      if (!message) {
+        return res.status(400).json({ error: "Message is required" });
+      }
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+
+      const systemPrompt = `You are a friendly and helpful IT support assistant called Smart IT Copilot. Your job is to help users troubleshoot their IT issues step by step.
+
+TICKET CONTEXT:
+- Subject: ${ticket.subject}
+- Description: ${ticket.description}
+- Category: ${ticket.category || "Not specified"}
+- Priority: ${ticket.priority}
+- Status: ${ticket.status}
+${ticket.aiSuggestions ? `- Initial AI Suggestions: ${ticket.aiSuggestions}` : ""}
+
+INSTRUCTIONS:
+1. Provide clear, simple, step-by-step instructions that anyone can follow
+2. Use numbered steps for troubleshooting procedures
+3. Ask follow-up questions if you need more information
+4. Use simple, non-technical language whenever possible
+5. If a step doesn't work, offer alternative solutions
+6. Be encouraging and patient
+7. Keep responses concise but thorough
+
+Remember: The user may not be technical, so explain things in everyday terms.`;
+
+      const chatMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+        { role: "system", content: systemPrompt },
+        ...history.map((msg: { role: string; content: string }) => ({
+          role: msg.role as "user" | "assistant",
+          content: msg.content,
+        })),
+        { role: "user", content: message },
+      ];
+
+      const stream = await openai.chat.completions.create({
+        model: "gpt-5-mini",
+        messages: chatMessages,
+        stream: true,
+        max_completion_tokens: 2048,
+      });
+
+      let fullResponse = "";
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || "";
+        if (content) {
+          fullResponse += content;
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        }
+      }
+
+      res.write(`data: ${JSON.stringify({ done: true, fullResponse })}\n\n`);
+      res.end();
+    } catch (error) {
+      console.error("Error in AI chat:", error);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: "AI chat failed. Please try again." })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ error: "Failed to process chat message" });
+      }
     }
   });
 

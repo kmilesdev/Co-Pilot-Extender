@@ -37,6 +37,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { Ticket, ServiceNowHealthStatus } from "@shared/schema";
+import { AIChat } from "@/components/ai-chat";
 
 const priorityColors = {
   low: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
@@ -262,6 +263,8 @@ export default function TicketDetailPage() {
             </Card>
           )}
 
+          <AIChat ticketId={ticket.id} ticketSubject={ticket.subject} />
+
           {ticket.snSysId && (
             <Card>
               <CardHeader>
@@ -424,7 +427,7 @@ export default function TicketDetailPage() {
                     ServiceNow is not configured
                   </p>
                   <Link href="/servicenow">
-                    <Button variant="link" size="sm" className="mt-2">
+                    <Button variant="ghost" size="sm" className="mt-2 text-primary">
                       Configure now
                     </Button>
                   </Link>
