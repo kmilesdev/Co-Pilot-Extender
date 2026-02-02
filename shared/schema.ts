@@ -153,3 +153,128 @@ export interface TroubleshootingRequest {
   message: string;
   history: { role: "user" | "assistant"; content: string }[];
 }
+
+// Persistent Conversation/Chat types
+export interface Conversation {
+  id: string;
+  userId: string | null;
+  ticketId: string | null;
+  title: string;
+  createdAt: Date;
+  updatedAt: Date;
+  resolved: boolean;
+  deflected: boolean;
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversationId: string;
+  role: "user" | "assistant";
+  content: string;
+  attachments: ChatAttachment[];
+  createdAt: Date;
+}
+
+export type InsertConversation = Omit<Conversation, "id" | "createdAt" | "updatedAt">;
+export type InsertConversationMessage = Omit<ConversationMessage, "id" | "createdAt">;
+
+// Knowledge Base types
+export interface KBDocument {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  tags: string[];
+  createdAt: Date;
+  updatedAt: Date;
+  createdBy: string | null;
+  updatedBy: string | null;
+  version: number;
+}
+
+export interface KBChunk {
+  id: string;
+  documentId: string;
+  content: string;
+  embedding: number[] | null;
+  chunkIndex: number;
+  createdAt: Date;
+}
+
+export type InsertKBDocument = Omit<KBDocument, "id" | "createdAt" | "updatedAt" | "version">;
+export type InsertKBChunk = Omit<KBChunk, "id" | "createdAt">;
+
+// ML Training types
+export interface MLTrainingExample {
+  id: string;
+  ticketId: string | null;
+  inputText: string;
+  actualCategory: string | null;
+  actualPriority: string | null;
+  predictedCategory: string | null;
+  predictedPriority: string | null;
+  categoryCorrect: boolean | null;
+  priorityCorrect: boolean | null;
+  resolutionNotes: string | null;
+  createdAt: Date;
+}
+
+export interface MLModelVersion {
+  id: string;
+  version: number;
+  trainedAt: Date;
+  trainingExamples: number;
+  categoryAccuracy: number | null;
+  priorityAccuracy: number | null;
+  isActive: boolean;
+  modelData: string | null;
+}
+
+export type InsertMLTrainingExample = Omit<MLTrainingExample, "id" | "createdAt">;
+export type InsertMLModelVersion = Omit<MLModelVersion, "id" | "trainedAt">;
+
+export interface MLPrediction {
+  category: string;
+  categoryConfidence: number;
+  priority: string;
+  priorityConfidence: number;
+  reasoning: string;
+}
+
+export interface MLFeedback {
+  predictionId?: string;
+  ticketId: string;
+  predictedCategory: string;
+  predictedPriority: string;
+  actualCategory: string;
+  actualPriority: string;
+  wasHelpful: boolean;
+}
+
+// Analytics types
+export interface AnalyticsEvent {
+  id: string;
+  eventType: string;
+  userId: string | null;
+  ticketId: string | null;
+  conversationId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: Date;
+}
+
+export interface AnalyticsSummary {
+  totalChats: number;
+  totalTickets: number;
+  deflectedTickets: number;
+  avgResolutionTimeHours: number;
+  categoryAccuracy: number;
+  priorityAccuracy: number;
+  topCategories: { category: string; count: number }[];
+  estimatedCostSaved: number;
+}
+
+export type InsertAnalyticsEvent = Omit<AnalyticsEvent, "id" | "createdAt">;
+
+// Role values for user management
+export const userRoleValues = ["end_user", "agent", "admin"] as const;
+export type UserRole = typeof userRoleValues[number];

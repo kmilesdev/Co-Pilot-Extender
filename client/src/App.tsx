@@ -15,6 +15,10 @@ import NewTicketPage from "@/pages/ticket-new";
 import ServiceNowPage from "@/pages/servicenow";
 import HelpPage from "@/pages/help";
 import SettingsPage from "@/pages/settings";
+import CopilotPage from "@/pages/copilot";
+import KnowledgeBasePage from "@/pages/knowledge-base";
+import UsersPage from "@/pages/users";
+import AnalyticsPage from "@/pages/analytics";
 
 function Router() {
   return (
@@ -23,7 +27,11 @@ function Router() {
       <Route path="/tickets" component={TicketsPage} />
       <Route path="/tickets/new" component={NewTicketPage} />
       <Route path="/tickets/:id" component={TicketDetailPage} />
+      <Route path="/copilot" component={CopilotPage} />
       <Route path="/servicenow" component={ServiceNowPage} />
+      <Route path="/analytics" component={AnalyticsPage} />
+      <Route path="/knowledge-base" component={KnowledgeBasePage} />
+      <Route path="/users" component={UsersPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/help" component={HelpPage} />
       <Route component={NotFound} />

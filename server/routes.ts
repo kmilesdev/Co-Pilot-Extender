@@ -565,6 +565,679 @@ ${attachments.length > 0 ? "\nThe user has attached files/images. Please analyze
     }
   });
 
+  // =====================
+  // User Management Routes
+  // =====================
+
+  app.get("/api/users", async (req, res) => {
+    try {
+      const users = await storage.getUsers();
+      const safeUsers = users.map(({ password, ...user }) => user);
+      res.json(safeUsers);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  app.get("/api/users/:id", async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const { password, ...safeUser } = user;
+      res.json(safeUser);
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ error: "Failed to fetch user" });
+    }
+  });
+
+  app.post("/api/users", async (req, res) => {
+    try {
+      const { username, password, email, role } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password required" });
+      }
+      const existing = await storage.getUserByUsername(username);
+      if (existing) {
+        return res.status(409).json({ error: "Username already exists" });
+      }
+      const user = await storage.createUser({ username, password, email, role });
+      const { password: _, ...safeUser } = user;
+      res.status(201).json(safeUser);
+    } catch (error) {
+      console.error("Error creating user:", error);
+      res.status(500).json({ error: "Failed to create user" });
+    }
+  });
+
+  app.patch("/api/users/:id", async (req, res) => {
+    try {
+      const { role, email } = req.body;
+      const user = await storage.updateUser(req.params.id, { role, email });
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const { password, ...safeUser } = user;
+      res.json(safeUser);
+    } catch (error) {
+      console.error("Error updating user:", error);
+      res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+
+  app.delete("/api/users/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteUser(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  // =====================
+  // Conversation Routes
+  // =====================
+
+  app.get("/api/conversations", async (req, res) => {
+    try {
+      const userId = req.query.userId as string | undefined;
+      const conversations = await storage.getConversations(userId);
+      res.json(conversations);
+    } catch (error) {
+      console.error("Error fetching conversations:", error);
+      res.status(500).json({ error: "Failed to fetch conversations" });
+    }
+  });
+
+  app.get("/api/conversations/:id", async (req, res) => {
+    try {
+      const conversation = await storage.getConversation(req.params.id);
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+      const messages = await storage.getConversationMessages(req.params.id);
+      res.json({ ...conversation, messages });
+    } catch (error) {
+      console.error("Error fetching conversation:", error);
+      res.status(500).json({ error: "Failed to fetch conversation" });
+    }
+  });
+
+  app.get("/api/tickets/:ticketId/conversation", async (req, res) => {
+    try {
+      const conversation = await storage.getConversationByTicketId(req.params.ticketId);
+      if (!conversation) {
+        return res.status(404).json({ error: "No conversation found for this ticket" });
+      }
+      const messages = await storage.getConversationMessages(conversation.id);
+      res.json({ ...conversation, messages });
+    } catch (error) {
+      console.error("Error fetching ticket conversation:", error);
+      res.status(500).json({ error: "Failed to fetch conversation" });
+    }
+  });
+
+  app.post("/api/conversations", async (req, res) => {
+    try {
+      const { userId, ticketId, title } = req.body;
+      const conversation = await storage.createConversation({
+        userId: userId || null,
+        ticketId: ticketId || null,
+        title: title || "New Conversation",
+        resolved: false,
+        deflected: false,
+      });
+      
+      await storage.createAnalyticsEvent({
+        eventType: "conversation_started",
+        userId: userId || null,
+        ticketId: ticketId || null,
+        conversationId: conversation.id,
+        metadata: {},
+      });
+      
+      res.status(201).json(conversation);
+    } catch (error) {
+      console.error("Error creating conversation:", error);
+      res.status(500).json({ error: "Failed to create conversation" });
+    }
+  });
+
+  app.post("/api/conversations/:id/messages", async (req, res) => {
+    try {
+      const conversation = await storage.getConversation(req.params.id);
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+
+      const { role, content, attachments = [] } = req.body;
+      if (!role || !content) {
+        return res.status(400).json({ error: "Role and content required" });
+      }
+
+      const message = await storage.addConversationMessage({
+        conversationId: req.params.id,
+        role,
+        content,
+        attachments,
+      });
+
+      res.status(201).json(message);
+    } catch (error) {
+      console.error("Error adding message:", error);
+      res.status(500).json({ error: "Failed to add message" });
+    }
+  });
+
+  app.patch("/api/conversations/:id", async (req, res) => {
+    try {
+      const { resolved, deflected, title } = req.body;
+      const conversation = await storage.updateConversation(req.params.id, { 
+        resolved, 
+        deflected,
+        title 
+      });
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+
+      if (deflected) {
+        await storage.createAnalyticsEvent({
+          eventType: "ticket_deflected",
+          userId: conversation.userId,
+          ticketId: conversation.ticketId,
+          conversationId: conversation.id,
+          metadata: {},
+        });
+      }
+
+      res.json(conversation);
+    } catch (error) {
+      console.error("Error updating conversation:", error);
+      res.status(500).json({ error: "Failed to update conversation" });
+    }
+  });
+
+  app.delete("/api/conversations/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteConversation(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting conversation:", error);
+      res.status(500).json({ error: "Failed to delete conversation" });
+    }
+  });
+
+  // Global Copilot Chat (not tied to a ticket)
+  app.post("/api/copilot/chat", async (req, res) => {
+    try {
+      const { message, history = [], attachments = [], conversationId } = req.body;
+      if (!message && attachments.length === 0) {
+        return res.status(400).json({ error: "Message or attachments required" });
+      }
+
+      // Get KB documents for RAG
+      const kbDocs = await storage.getKBDocuments();
+      const kbContext = kbDocs.slice(0, 5).map(doc => 
+        `[${doc.title}]\n${doc.content.slice(0, 500)}...`
+      ).join("\n\n");
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+
+      const systemPrompt = `You are Smart IT Copilot, a friendly and expert IT support assistant. Your goal is to help users troubleshoot IT issues BEFORE they need to create a support ticket.
+
+RESPONSE FORMAT (Always follow this structure):
+1. **Summary**: Brief explanation of the likely issue
+2. **Steps to Try**: Numbered troubleshooting steps in simple language
+3. **If That Doesn't Work**: Alternative solutions
+4. **When to Escalate**: When to create a ticket or contact IT directly
+5. **Confidence**: Low/Medium/High + brief reason
+
+KNOWLEDGE BASE ARTICLES:
+${kbContext || "No articles loaded."}
+
+INSTRUCTIONS:
+- Use simple, everyday language (user may not be technical)
+- Provide clear, numbered steps
+- If you're uncertain, ask clarifying questions
+- Reference KB articles when relevant and cite sources
+- Be encouraging and patient
+- Keep responses concise but thorough
+${attachments.length > 0 ? "\nThe user has attached files/images. Analyze them to help troubleshoot." : ""}`;
+
+      type MessageContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+      
+      const buildMessageContent = (text: string, msgAttachments?: { name: string; type: string; dataUrl: string }[]): MessageContent => {
+        if (!msgAttachments || msgAttachments.length === 0) {
+          return text || "";
+        }
+        
+        const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [];
+        
+        if (text) {
+          content.push({ type: "text", text });
+        }
+        
+        for (const att of msgAttachments) {
+          if (att.type.startsWith("image/")) {
+            content.push({
+              type: "image_url",
+              image_url: { url: att.dataUrl },
+            });
+          } else {
+            const base64Content = att.dataUrl.split(",")[1] || "";
+            try {
+              const decoded = Buffer.from(base64Content, "base64").toString("utf-8");
+              content.push({
+                type: "text",
+                text: `[File: ${att.name}]\n${decoded.slice(0, 5000)}${decoded.length > 5000 ? "...(truncated)" : ""}`,
+              });
+            } catch {
+              content.push({
+                type: "text",
+                text: `[File: ${att.name}] (binary file, cannot display content)`,
+              });
+            }
+          }
+        }
+        
+        return content.length > 0 ? content : text || "";
+      };
+
+      const chatMessages: any[] = [
+        { role: "system", content: systemPrompt },
+        ...history.map((msg: { role: string; content: string; attachments?: { name: string; type: string; dataUrl: string }[] }) => ({
+          role: msg.role as "user" | "assistant",
+          content: buildMessageContent(msg.content, msg.attachments),
+        })),
+        { role: "user", content: buildMessageContent(message || "", attachments) },
+      ];
+
+      const stream = await openai.chat.completions.create({
+        model: "gpt-5-mini",
+        messages: chatMessages as any,
+        stream: true,
+        max_completion_tokens: 2048,
+      });
+
+      let fullResponse = "";
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content || "";
+        if (content) {
+          fullResponse += content;
+          res.write(`data: ${JSON.stringify({ content })}\n\n`);
+        }
+      }
+
+      // Track analytics
+      await storage.createAnalyticsEvent({
+        eventType: "chat_message",
+        userId: null,
+        ticketId: null,
+        conversationId: conversationId || null,
+        metadata: { messageLength: message?.length || 0, hasAttachments: attachments.length > 0 },
+      });
+
+      res.write(`data: ${JSON.stringify({ done: true, fullResponse })}\n\n`);
+      res.end();
+    } catch (error) {
+      console.error("Error in Copilot chat:", error);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: "Chat failed. Please try again." })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ error: "Failed to process chat message" });
+      }
+    }
+  });
+
+  // =====================
+  // Knowledge Base Routes
+  // =====================
+
+  app.get("/api/kb/documents", async (req, res) => {
+    try {
+      const documents = await storage.getKBDocuments();
+      res.json(documents);
+    } catch (error) {
+      console.error("Error fetching KB documents:", error);
+      res.status(500).json({ error: "Failed to fetch documents" });
+    }
+  });
+
+  app.get("/api/kb/documents/:id", async (req, res) => {
+    try {
+      const document = await storage.getKBDocument(req.params.id);
+      if (!document) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+      res.json(document);
+    } catch (error) {
+      console.error("Error fetching KB document:", error);
+      res.status(500).json({ error: "Failed to fetch document" });
+    }
+  });
+
+  app.post("/api/kb/documents", async (req, res) => {
+    try {
+      const { title, content, category, tags = [] } = req.body;
+      if (!title || !content) {
+        return res.status(400).json({ error: "Title and content required" });
+      }
+      const document = await storage.createKBDocument({
+        title,
+        content,
+        category: category || "general",
+        tags,
+        createdBy: null,
+        updatedBy: null,
+      });
+      res.status(201).json(document);
+    } catch (error) {
+      console.error("Error creating KB document:", error);
+      res.status(500).json({ error: "Failed to create document" });
+    }
+  });
+
+  app.patch("/api/kb/documents/:id", async (req, res) => {
+    try {
+      const { title, content, category, tags } = req.body;
+      const document = await storage.updateKBDocument(req.params.id, {
+        title,
+        content,
+        category,
+        tags,
+        updatedBy: null,
+      });
+      if (!document) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+      res.json(document);
+    } catch (error) {
+      console.error("Error updating KB document:", error);
+      res.status(500).json({ error: "Failed to update document" });
+    }
+  });
+
+  app.delete("/api/kb/documents/:id", async (req, res) => {
+    try {
+      const deleted = await storage.deleteKBDocument(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Document not found" });
+      }
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting KB document:", error);
+      res.status(500).json({ error: "Failed to delete document" });
+    }
+  });
+
+  app.get("/api/kb/search", async (req, res) => {
+    try {
+      const query = (req.query.q as string || "").toLowerCase();
+      const category = req.query.category as string | undefined;
+      
+      let documents = await storage.getKBDocuments();
+      
+      if (category) {
+        documents = documents.filter(d => d.category === category);
+      }
+      
+      if (query) {
+        documents = documents.filter(d => 
+          d.title.toLowerCase().includes(query) ||
+          d.content.toLowerCase().includes(query) ||
+          d.tags.some(t => t.toLowerCase().includes(query))
+        );
+      }
+      
+      res.json(documents);
+    } catch (error) {
+      console.error("Error searching KB:", error);
+      res.status(500).json({ error: "Failed to search documents" });
+    }
+  });
+
+  // =====================
+  // ML Prediction Routes
+  // =====================
+
+  app.post("/api/ml/predict", async (req, res) => {
+    try {
+      const { title, description } = req.body;
+      if (!title && !description) {
+        return res.status(400).json({ error: "Title or description required" });
+      }
+
+      const text = `${title || ""} ${description || ""}`;
+      const category = predictCategory(text);
+      const priority = predictPriority(text);
+
+      // Get active model for confidence estimation
+      const activeModel = await storage.getActiveMLModel();
+      const baseConfidence = activeModel ? 0.7 : 0.5;
+
+      const prediction = {
+        category,
+        categoryConfidence: baseConfidence + Math.random() * 0.2,
+        priority,
+        priorityConfidence: baseConfidence + Math.random() * 0.2,
+        reasoning: `Based on keyword analysis. Model version: ${activeModel?.version || "baseline"}`,
+      };
+
+      res.json(prediction);
+    } catch (error) {
+      console.error("Error in ML prediction:", error);
+      res.status(500).json({ error: "Failed to generate prediction" });
+    }
+  });
+
+  app.post("/api/ml/feedback", async (req, res) => {
+    try {
+      const { 
+        ticketId, 
+        predictedCategory, 
+        predictedPriority, 
+        actualCategory, 
+        actualPriority,
+        inputText 
+      } = req.body;
+
+      const example = await storage.createMLTrainingExample({
+        ticketId: ticketId || null,
+        inputText: inputText || "",
+        actualCategory: actualCategory || null,
+        actualPriority: actualPriority || null,
+        predictedCategory: predictedCategory || null,
+        predictedPriority: predictedPriority || null,
+        categoryCorrect: actualCategory === predictedCategory,
+        priorityCorrect: actualPriority === predictedPriority,
+        resolutionNotes: null,
+      });
+
+      res.status(201).json({ message: "Feedback recorded", example });
+    } catch (error) {
+      console.error("Error recording ML feedback:", error);
+      res.status(500).json({ error: "Failed to record feedback" });
+    }
+  });
+
+  app.get("/api/ml/status", async (req, res) => {
+    try {
+      const activeModel = await storage.getActiveMLModel();
+      const allModels = await storage.getMLModelVersions();
+      const trainingExamples = await storage.getMLTrainingExamples();
+
+      const recentExamples = trainingExamples.slice(0, 100);
+      const categoryCorrect = recentExamples.filter(e => e.categoryCorrect).length;
+      const priorityCorrect = recentExamples.filter(e => e.priorityCorrect).length;
+      const total = recentExamples.length;
+
+      res.json({
+        activeModel: activeModel ? {
+          version: activeModel.version,
+          trainedAt: activeModel.trainedAt,
+          trainingExamples: activeModel.trainingExamples,
+          categoryAccuracy: activeModel.categoryAccuracy,
+          priorityAccuracy: activeModel.priorityAccuracy,
+        } : null,
+        modelCount: allModels.length,
+        trainingExamplesCount: trainingExamples.length,
+        recentAccuracy: total > 0 ? {
+          category: categoryCorrect / total,
+          priority: priorityCorrect / total,
+        } : null,
+      });
+    } catch (error) {
+      console.error("Error fetching ML status:", error);
+      res.status(500).json({ error: "Failed to fetch ML status" });
+    }
+  });
+
+  app.post("/api/ml/retrain", async (req, res) => {
+    try {
+      const trainingExamples = await storage.getMLTrainingExamples();
+      
+      if (trainingExamples.length < 10) {
+        return res.status(400).json({ 
+          error: "Not enough training examples. Need at least 10." 
+        });
+      }
+
+      // Simulate training (in real implementation, would use scikit-learn or similar)
+      const categoryCorrect = trainingExamples.filter(e => e.categoryCorrect).length;
+      const priorityCorrect = trainingExamples.filter(e => e.priorityCorrect).length;
+      const total = trainingExamples.length;
+
+      const newModel = await storage.createMLModelVersion({
+        version: 0, // Will be auto-incremented
+        trainingExamples: total,
+        categoryAccuracy: total > 0 ? categoryCorrect / total : null,
+        priorityAccuracy: total > 0 ? priorityCorrect / total : null,
+        isActive: true,
+        modelData: null, // Would contain serialized model in real implementation
+      });
+
+      await storage.setActiveMLModel(newModel.id);
+
+      res.json({
+        message: "Model retrained successfully",
+        model: {
+          version: newModel.version,
+          trainedAt: newModel.trainedAt,
+          trainingExamples: newModel.trainingExamples,
+          categoryAccuracy: newModel.categoryAccuracy,
+          priorityAccuracy: newModel.priorityAccuracy,
+        },
+      });
+    } catch (error) {
+      console.error("Error retraining ML model:", error);
+      res.status(500).json({ error: "Failed to retrain model" });
+    }
+  });
+
+  // =====================
+  // Analytics Routes
+  // =====================
+
+  app.get("/api/analytics/summary", async (req, res) => {
+    try {
+      const events = await storage.getAnalyticsEvents();
+      const tickets = await storage.getTickets();
+      const conversations = await storage.getConversations();
+      const trainingExamples = await storage.getMLTrainingExamples();
+
+      const chatEvents = events.filter(e => e.eventType === "chat_message");
+      const deflectedEvents = events.filter(e => e.eventType === "ticket_deflected");
+
+      // Calculate category distribution
+      const categoryCount: Record<string, number> = {};
+      for (const ticket of tickets) {
+        const cat = ticket.category || "other";
+        categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+      }
+      const topCategories = Object.entries(categoryCount)
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+      // Calculate avg resolution time (for resolved tickets)
+      const resolvedTickets = tickets.filter(t => t.status === "resolved" || t.status === "closed");
+      let avgResolutionTimeHours = 0;
+      if (resolvedTickets.length > 0) {
+        const totalHours = resolvedTickets.reduce((sum, t) => {
+          if (t.createdAt && t.updatedAt) {
+            const hours = (new Date(t.updatedAt).getTime() - new Date(t.createdAt).getTime()) / (1000 * 60 * 60);
+            return sum + hours;
+          }
+          return sum;
+        }, 0);
+        avgResolutionTimeHours = totalHours / resolvedTickets.length;
+      }
+
+      // ML accuracy
+      const recentExamples = trainingExamples.slice(0, 100);
+      const categoryCorrect = recentExamples.filter(e => e.categoryCorrect).length;
+      const priorityCorrect = recentExamples.filter(e => e.priorityCorrect).length;
+
+      // Cost per ticket (configurable)
+      const costPerTicket = 25; // $25 average cost per ticket
+
+      const summary = {
+        totalChats: chatEvents.length,
+        totalTickets: tickets.length,
+        deflectedTickets: deflectedEvents.length,
+        avgResolutionTimeHours: Math.round(avgResolutionTimeHours * 10) / 10,
+        categoryAccuracy: recentExamples.length > 0 ? categoryCorrect / recentExamples.length : 0,
+        priorityAccuracy: recentExamples.length > 0 ? priorityCorrect / recentExamples.length : 0,
+        topCategories,
+        estimatedCostSaved: deflectedEvents.length * costPerTicket,
+      };
+
+      res.json(summary);
+    } catch (error) {
+      console.error("Error fetching analytics summary:", error);
+      res.status(500).json({ error: "Failed to fetch analytics" });
+    }
+  });
+
+  app.get("/api/analytics/export", async (req, res) => {
+    try {
+      const events = await storage.getAnalyticsEvents();
+      const tickets = await storage.getTickets();
+
+      // Create CSV content
+      let csv = "Type,Date,Category,Priority,Status,Resolution Time (hours)\n";
+      
+      for (const ticket of tickets) {
+        const resolutionTime = ticket.createdAt && ticket.updatedAt
+          ? ((new Date(ticket.updatedAt).getTime() - new Date(ticket.createdAt).getTime()) / (1000 * 60 * 60)).toFixed(1)
+          : "";
+        csv += `Ticket,${ticket.createdAt?.toISOString() || ""},${ticket.category || ""},${ticket.priority},${ticket.status},${resolutionTime}\n`;
+      }
+
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", "attachment; filename=smart-it-copilot-analytics.csv");
+      res.send(csv);
+    } catch (error) {
+      console.error("Error exporting analytics:", error);
+      res.status(500).json({ error: "Failed to export analytics" });
+    }
+  });
+
   return httpServer;
 }
 

@@ -1,0 +1,329 @@
+Build on my existing project “Smart IT Copilot” (do NOT start from scratch). Your job is to extend what’s already working.
+
+0) Ground rules
+
+Keep the current UI layout and sidebar (Dashboard / Tickets / ServiceNow / Settings / Help).
+
+Don’t break existing routes/pages.
+
+Add features incrementally and keep code clean.
+
+Keep .replit and replit.md as-is (system files). Do not rename them.
+
+If any folder/file contains “replit” and is NOT a system file, rename it to remove “replit” (and update imports/paths).
+
+Add clear README instructions for running locally + environment variables.
+
+Add a .env.example and use environment variables for secrets.
+
+Ensure everything works in Replit dev environment.
+
+1) Add AI Chat Copilot (core feature)
+Goal
+
+Create an AI Copilot chat that helps users troubleshoot issues BEFORE creating a ticket, and also helps agents resolve tickets faster.
+
+Requirements
+
+Add a “Copilot Chat” panel accessible in TWO places:
+
+A global chat page in the sidebar: Copilot Chat
+
+Inside each ticket detail view: Ask Copilot about this ticket
+
+Chat must support multi-turn conversation, store conversation history in the database, and be associated to:
+
+user
+
+optional ticket
+
+timestamps
+
+Output style (important)
+
+Copilot responses must always include:
+
+Plain-English summary
+
+Step-by-step troubleshooting instructions (numbered steps)
+
+What to try next if step fails
+
+When to escalate / create ticket
+
+Confidence score (Low/Med/High) + why
+
+2) Add Machine Learning Triage + Continuous Learning (real ML)
+Goal
+
+Add a real ML layer that learns from historical tickets + outcomes to improve routing, priority, and troubleshooting guidance.
+
+Requirements (MVP-Realistic)
+
+Implement an ML pipeline using a lightweight approach (e.g., scikit-learn):
+
+Input features: title + description + category tags + resolution notes (if available)
+
+Baseline model: TF-IDF + linear classifier (LogReg/SVM) for:
+
+Category prediction
+
+Priority/urgency prediction
+
+Add database tables for:
+
+ml_training_examples (ticket text, labels, outcome, timestamps)
+
+ml_model_versions (version id, trained_at, metrics, active flag)
+
+Add endpoints:
+
+POST /api/ml/predict → returns predicted category, priority, confidence
+
+POST /api/ml/feedback → store whether the prediction was correct + final labels
+
+POST /api/ml/retrain (Admin only) → trains a new model version
+
+GET /api/ml/status → active model version + basic metrics
+
+Add UI integration:
+
+On ticket create/edit: show “Predicted Category/Priority (confidence)” + allow user/agent to override
+
+On dashboard: show “Top predicted categories this week” and “Model confidence trend” (simple)
+
+Continuous learning loop:
+
+When a ticket is resolved, save the final category/priority + resolution outcome into training examples
+
+Retrain manually via Admin (button) or scheduled weekly (simple cron-like approach if available)
+
+Guardrails:
+
+If confidence is low, Copilot should ask clarifying questions rather than guessing
+
+Always allow human override
+
+ML + Copilot connection
+
+Copilot must use ML predictions to tailor troubleshooting:
+
+If predicted category is VPN → show VPN runbook-style steps
+
+If predicted priority is urgent → include escalation guidance and risk warnings
+
+3) Add Knowledge Base + RAG (company knowledge grounding)
+Goal
+
+Copilot must answer using the company’s internal knowledge, not generic advice.
+
+Requirements
+
+Create a Knowledge Base admin page (sidebar visible to Admin only):
+
+Upload documents: .txt, .md, .pdf (if PDF parsing is hard, allow txt/md first and stub PDF parsing)
+
+Add/edit “articles” manually in a rich textarea
+
+Tag articles (VPN, Email, Printer, Security, etc.)
+
+Versioning basics: updated_at, updated_by
+
+Implement RAG:
+
+Store chunks + embeddings (use a simple approach supported in Replit: either local embeddings or an external embeddings API via env var)
+
+At answer time: retrieve top relevant chunks and feed them into the chat prompt
+
+Show “Sources” under each answer (article title + snippet)
+
+Add a “Suggested KB Articles” widget in ticket view based on similarity.
+
+4) Attachments in Chat (images + logs)
+Goal
+
+Users can upload screenshots/logs so Copilot can troubleshoot better.
+
+Requirements
+
+In chat, allow uploading:
+
+images: png/jpg
+
+logs/text: txt/log
+
+Store metadata in DB and file on disk (or storage folder). Keep it simple.
+
+For txt/log: extract text and pass into Copilot context.
+
+For images: store image and include a note in the chat context like “User uploaded screenshot: <filename>”. If image analysis is supported via an API, add optional support controlled by env var.
+
+Add basic safeguards:
+
+max file size
+
+allowed file types
+
+5) ServiceNow Integration Upgrade (still MVP-friendly)
+Goal
+
+Make the ServiceNow page real and useful.
+
+Requirements
+
+On ServiceNow page:
+
+Config form for instance URL + user + token/password (from env vars or secure storage)
+
+“Test Connection” button
+
+Sync options: import incidents, push ticket to ServiceNow, update status/notes
+
+Add these actions:
+
+“Create ServiceNow Incident” from a ticket
+
+“Pull latest status/notes” from linked incident
+
+“Add comment/work note” from within Smart IT Copilot
+
+Keep it optional: the app must work without ServiceNow configured.
+
+6) Roles + Profiles (Admin vs Agent vs End User)
+Goal
+
+Support enterprise-style role separation.
+
+Requirements
+
+Add user roles: admin, agent, end_user
+
+Add a simple Users page for admins:
+
+list users
+
+change roles
+
+deactivate user
+
+In sidebar footer, show current user name + role.
+
+Restrict:
+
+KB management: Admin only
+
+ServiceNow config: Admin only
+
+Tickets: Agent + Admin
+
+Copilot Chat: all users, but end_user should not see internal-only info
+
+7) Settings + Help pages (real-world usable)
+Settings page should include:
+
+Profile settings (name, email, timezone)
+
+Notification preferences (stub if needed)
+
+Copilot preferences:
+
+response verbosity (short/normal/detailed)
+
+allow “auto-draft ticket” yes/no
+
+Admin settings section:
+
+KB refresh/reindex button
+
+ServiceNow integration status
+
+ML controls: retrain button + model status + last trained date
+
+Help page should include:
+
+What this tool does
+
+How to use Copilot Chat
+
+How to upload attachments safely
+
+How ServiceNow sync works
+
+How ML triage works + how to correct predictions (feedback loop)
+
+FAQ + troubleshooting
+
+“Contact admin” guidance
+
+8) Analytics that prove ROI
+Goal
+
+Add an “AI Insights” / analytics layer that helps sell this to companies.
+
+Requirements (MVP)
+
+Track:
+
+of chats
+of tickets created after chat
+
+“Deflected tickets” (user solved without creating ticket) — implement with a simple prompt at end: “Did this solve your issue? Yes/No”
+
+Top issue categories (include predicted vs final)
+
+Avg time to resolve (for tickets)
+
+ML accuracy proxy: how often predicted category matched final category
+
+Create a dashboard widget: “Estimated Cost Saved” using a configurable $/ticket value in settings.
+
+Add export to CSV for analytics.
+
+9) Ticket drafting + smart intake
+Goal
+
+Let Copilot convert a chat into a well-formed ticket when needed.
+
+Requirements
+
+Add “Create Ticket from Chat” button:
+
+Pre-fill title, description, steps tried, device/app, impact, urgency
+
+Include ML predictions + confidence
+
+Add a guided intake form for end users:
+
+pick category (and show ML suggestion)
+
+describe symptoms
+
+upload screenshot/log
+
+Copilot suggests fixes first before “Submit ticket”
+
+10) Code quality + structure
+
+Add consistent API routes, input validation, and error handling.
+
+Add database migrations if you already have a DB.
+
+Add clear comments and keep naming consistent.
+
+Add unit-test stubs if possible (optional).
+
+11) Delivery checklist
+
+When finished, provide:
+
+Summary of what you changed
+
+Where each new feature lives in the code
+
+Exact steps to run it
+
+All environment variables needed
+
+Any limitations + recommended next steps for production hosting
+
+If anything in my current code conflicts with these requirements, keep what’s already there and extend it safely without breaking existing functionality.

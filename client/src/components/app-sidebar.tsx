@@ -18,6 +18,10 @@ import {
   Settings,
   HelpCircle,
   Bot,
+  MessageCircle,
+  BarChart3,
+  Book,
+  Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -28,6 +32,11 @@ const mainMenuItems = [
     icon: LayoutDashboard,
   },
   {
+    title: "Copilot Chat",
+    url: "/copilot",
+    icon: MessageCircle,
+  },
+  {
     title: "Tickets",
     url: "/tickets",
     icon: Ticket,
@@ -36,6 +45,24 @@ const mainMenuItems = [
     title: "ServiceNow",
     url: "/servicenow",
     icon: Cloud,
+  },
+  {
+    title: "Analytics",
+    url: "/analytics",
+    icon: BarChart3,
+  },
+];
+
+const adminMenuItems = [
+  {
+    title: "Knowledge Base",
+    url: "/knowledge-base",
+    icon: Book,
+  },
+  {
+    title: "Users",
+    url: "/users",
+    icon: Users,
   },
 ];
 
@@ -90,6 +117,29 @@ export function AppSidebar() {
                             Beta
                           </Badge>
                         )}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-sidebar-foreground/50 text-xs uppercase tracking-wider">
+            Admin
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {adminMenuItems.map((item) => {
+                const isActive = location === item.url || location.startsWith(item.url);
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive}>
+                      <Link href={item.url} data-testid={`link-${item.title.toLowerCase().replace(" ", "-")}`}>
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

@@ -1,14 +1,24 @@
 # Smart IT Copilot
 
 ## Overview
-Smart IT Copilot is an AI-powered IT support ticket management system with ServiceNow integration. It helps IT teams manage support tickets efficiently with intelligent categorization, priority prediction, and seamless ServiceNow synchronization.
+Smart IT Copilot is an AI-powered IT support ticket management system with ServiceNow integration. It helps IT teams manage support tickets efficiently with intelligent categorization, priority prediction, interactive troubleshooting chat, and comprehensive analytics.
 
 ## Features
+
+### Core Features
 - **Dashboard**: Overview of ticket statistics, recent tickets, and ServiceNow connection status
 - **Ticket Management**: Create, view, and update support tickets with AI-powered suggestions
 - **AI Analysis**: Automatic category prediction, priority assessment, and resolution suggestions
-- **AI Troubleshooting Chat**: Interactive chat assistant on ticket detail page providing step-by-step troubleshooting guidance in simple, non-technical language
-- **ServiceNow Integration**: Pull incidents from ServiceNow, create incidents from local tickets, and sync status updates
+- **AI Troubleshooting Chat**: Interactive chat assistant with file/photo upload for troubleshooting
+- **ServiceNow Integration**: Bidirectional sync with incidents, users, and groups
+
+### New Features
+- **Global Copilot Chat**: Get AI help before creating a ticket (accessible from sidebar)
+- **Knowledge Base**: Admin-managed internal documentation for AI-powered responses
+- **ML Triage**: Machine learning-based categorization with feedback loop
+- **Analytics Dashboard**: Track deflected tickets, cost savings, and ROI
+- **User Management**: Role-based access control (Admin, Agent, End User)
+- **File Attachments**: Upload screenshots and logs in chat for better troubleshooting
 
 ## Technology Stack
 - **Frontend**: React + TypeScript + Vite
@@ -103,8 +113,59 @@ To enable ServiceNow integration, set the following environment variables in Rep
 The application runs on port 5000. The workflow `npm run dev` starts both frontend and backend.
 
 ## Recent Changes
+- Added Global Copilot Chat page for pre-ticket troubleshooting
+- Added Knowledge Base management for admins
+- Added User Management with role-based access (Admin/Agent/End User)
+- Added Analytics Dashboard with ROI tracking
+- Added ML prediction endpoints with feedback loop
+- Added file/photo attachment capability in AI chat
+- Added ServiceNow user and group sync
 - Added AI Troubleshooting Chat feature on ticket detail page with SSE streaming
 - Initial implementation of Smart IT Copilot with ServiceNow integration
-- Dashboard with ticket statistics and AI insights
-- Ticket CRUD operations with AI-powered suggestions
-- ServiceNow page with incident listing and import functionality
+
+## Quick Start
+
+1. Copy `.env.example` to your environment secrets
+2. Run `npm install` to install dependencies
+3. Run `npm run dev` to start the development server
+4. Open http://localhost:5000 in your browser
+
+## Additional API Endpoints
+
+### Copilot Chat
+- `POST /api/copilot/chat` - Global AI chat (SSE streaming)
+
+### Conversations
+- `GET /api/conversations` - List all conversations
+- `POST /api/conversations` - Create new conversation
+- `GET /api/conversations/:id` - Get conversation with messages
+
+### Knowledge Base
+- `GET /api/kb/documents` - List KB articles
+- `POST /api/kb/documents` - Create article
+- `PATCH /api/kb/documents/:id` - Update article
+- `DELETE /api/kb/documents/:id` - Delete article
+
+### ML
+- `POST /api/ml/predict` - Get category/priority prediction
+- `POST /api/ml/feedback` - Submit prediction feedback
+- `GET /api/ml/status` - Get ML model status
+- `POST /api/ml/retrain` - Retrain ML model
+
+### Analytics
+- `GET /api/analytics/summary` - Get analytics summary
+- `GET /api/analytics/export` - Export as CSV
+
+### Users
+- `GET /api/users` - List users
+- `POST /api/users` - Create user
+- `PATCH /api/users/:id` - Update user
+- `DELETE /api/users/:id` - Delete user
+
+## Limitations & Next Steps
+
+1. **Authentication**: Uses simple in-memory auth. Consider JWT for production.
+2. **Database**: Uses in-memory storage. Enable PostgreSQL for persistence.
+3. **ML Training**: Rule-based classifier. Integrate Python/scikit-learn for real ML.
+4. **RAG**: Keyword-based KB search. Add vector embeddings for semantic search.
+5. **Rate Limiting**: Add rate limiting for production.

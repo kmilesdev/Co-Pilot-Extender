@@ -1,11 +1,23 @@
-import { type User, type InsertUser, type Ticket, type InsertTicket, type SyncedUser, type SyncedGroup } from "@shared/schema";
+import { 
+  type User, type InsertUser, type Ticket, type InsertTicket, 
+  type SyncedUser, type SyncedGroup,
+  type Conversation, type InsertConversation, type ConversationMessage, type InsertConversationMessage,
+  type KBDocument, type InsertKBDocument, type KBChunk, type InsertKBChunk,
+  type MLTrainingExample, type InsertMLTrainingExample, type MLModelVersion, type InsertMLModelVersion,
+  type AnalyticsEvent, type InsertAnalyticsEvent
+} from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
+  // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getUsers(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
+  deleteUser(id: string): Promise<boolean>;
 
+  // Tickets
   getTickets(): Promise<Ticket[]>;
   getTicket(id: string): Promise<Ticket | undefined>;
   getTicketBySnSysId(snSysId: string): Promise<Ticket | undefined>;
@@ -13,6 +25,7 @@ export interface IStorage {
   updateTicket(id: string, updates: Partial<Ticket>): Promise<Ticket | undefined>;
   deleteTicket(id: string): Promise<boolean>;
 
+  // Synced Users (ServiceNow)
   getSyncedUsers(): Promise<SyncedUser[]>;
   getSyncedUser(id: string): Promise<SyncedUser | undefined>;
   getSyncedUserBySnSysId(snSysId: string): Promise<SyncedUser | undefined>;
@@ -20,12 +33,52 @@ export interface IStorage {
   deleteSyncedUser(id: string): Promise<boolean>;
   clearSyncedUsers(): Promise<void>;
 
+  // Synced Groups (ServiceNow)
   getSyncedGroups(): Promise<SyncedGroup[]>;
   getSyncedGroup(id: string): Promise<SyncedGroup | undefined>;
   getSyncedGroupBySnSysId(snSysId: string): Promise<SyncedGroup | undefined>;
   upsertSyncedGroup(group: Omit<SyncedGroup, "id">): Promise<SyncedGroup>;
   deleteSyncedGroup(id: string): Promise<boolean>;
   clearSyncedGroups(): Promise<void>;
+
+  // Conversations
+  getConversations(userId?: string): Promise<Conversation[]>;
+  getConversation(id: string): Promise<Conversation | undefined>;
+  getConversationByTicketId(ticketId: string): Promise<Conversation | undefined>;
+  createConversation(conv: InsertConversation): Promise<Conversation>;
+  updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined>;
+  deleteConversation(id: string): Promise<boolean>;
+
+  // Conversation Messages
+  getConversationMessages(conversationId: string): Promise<ConversationMessage[]>;
+  addConversationMessage(msg: InsertConversationMessage): Promise<ConversationMessage>;
+
+  // Knowledge Base Documents
+  getKBDocuments(): Promise<KBDocument[]>;
+  getKBDocument(id: string): Promise<KBDocument | undefined>;
+  createKBDocument(doc: InsertKBDocument): Promise<KBDocument>;
+  updateKBDocument(id: string, updates: Partial<KBDocument>): Promise<KBDocument | undefined>;
+  deleteKBDocument(id: string): Promise<boolean>;
+
+  // Knowledge Base Chunks
+  getKBChunks(documentId: string): Promise<KBChunk[]>;
+  getAllKBChunks(): Promise<KBChunk[]>;
+  createKBChunk(chunk: InsertKBChunk): Promise<KBChunk>;
+  deleteKBChunksForDocument(documentId: string): Promise<void>;
+
+  // ML Training Examples
+  getMLTrainingExamples(): Promise<MLTrainingExample[]>;
+  createMLTrainingExample(example: InsertMLTrainingExample): Promise<MLTrainingExample>;
+
+  // ML Model Versions
+  getMLModelVersions(): Promise<MLModelVersion[]>;
+  getActiveMLModel(): Promise<MLModelVersion | undefined>;
+  createMLModelVersion(model: InsertMLModelVersion): Promise<MLModelVersion>;
+  setActiveMLModel(id: string): Promise<void>;
+
+  // Analytics Events
+  getAnalyticsEvents(startDate?: Date, endDate?: Date): Promise<AnalyticsEvent[]>;
+  createAnalyticsEvent(event: InsertAnalyticsEvent): Promise<AnalyticsEvent>;
 }
 
 export class MemStorage implements IStorage {
@@ -33,15 +86,30 @@ export class MemStorage implements IStorage {
   private tickets: Map<string, Ticket>;
   private syncedUsers: Map<string, SyncedUser>;
   private syncedGroups: Map<string, SyncedGroup>;
+  private conversations: Map<string, Conversation>;
+  private conversationMessages: Map<string, ConversationMessage>;
+  private kbDocuments: Map<string, KBDocument>;
+  private kbChunks: Map<string, KBChunk>;
+  private mlTrainingExamples: Map<string, MLTrainingExample>;
+  private mlModelVersions: Map<string, MLModelVersion>;
+  private analyticsEvents: Map<string, AnalyticsEvent>;
 
   constructor() {
     this.users = new Map();
     this.tickets = new Map();
     this.syncedUsers = new Map();
     this.syncedGroups = new Map();
+    this.conversations = new Map();
+    this.conversationMessages = new Map();
+    this.kbDocuments = new Map();
+    this.kbChunks = new Map();
+    this.mlTrainingExamples = new Map();
+    this.mlModelVersions = new Map();
+    this.analyticsEvents = new Map();
     
     this.initializeDefaultUser();
     this.initializeSampleTickets();
+    this.initializeSampleKBDocuments();
   }
 
   private async initializeDefaultUser() {
@@ -117,8 +185,16 @@ export class MemStorage implements IStorage {
       const id = randomUUID();
       const now = new Date();
       const ticket: Ticket = {
-        ...ticketData,
         id,
+        subject: ticketData.subject,
+        description: ticketData.description,
+        status: ticketData.status || "open",
+        priority: ticketData.priority || "medium",
+        category: ticketData.category || null,
+        predictedCategory: ticketData.predictedCategory || null,
+        predictedPriority: ticketData.predictedPriority || null,
+        aiSuggestions: ticketData.aiSuggestions || null,
+        requesterEmail: ticketData.requesterEmail || null,
         createdAt: new Date(now.getTime() - Math.random() * 7 * 24 * 60 * 60 * 1000),
         updatedAt: now,
         assignedTo: null,
@@ -144,7 +220,12 @@ export class MemStorage implements IStorage {
 
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = randomUUID();
-    const user: User = { ...insertUser, id };
+    const user: User = { 
+      ...insertUser, 
+      id,
+      email: insertUser.email ?? null,
+      role: insertUser.role ?? "end_user",
+    };
     this.users.set(id, user);
     return user;
   }
@@ -287,6 +368,333 @@ export class MemStorage implements IStorage {
 
   async clearSyncedGroups(): Promise<void> {
     this.syncedGroups.clear();
+  }
+
+  // Users - extended methods
+  async getUsers(): Promise<User[]> {
+    return Array.from(this.users.values());
+  }
+
+  async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
+    const user = this.users.get(id);
+    if (!user) return undefined;
+    const updated: User = { ...user, ...updates, id };
+    this.users.set(id, updated);
+    return updated;
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    return this.users.delete(id);
+  }
+
+  // Conversations
+  async getConversations(userId?: string): Promise<Conversation[]> {
+    let convs = Array.from(this.conversations.values());
+    if (userId) {
+      convs = convs.filter(c => c.userId === userId);
+    }
+    return convs.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  }
+
+  async getConversation(id: string): Promise<Conversation | undefined> {
+    return this.conversations.get(id);
+  }
+
+  async getConversationByTicketId(ticketId: string): Promise<Conversation | undefined> {
+    return Array.from(this.conversations.values()).find(c => c.ticketId === ticketId);
+  }
+
+  async createConversation(conv: InsertConversation): Promise<Conversation> {
+    const id = randomUUID();
+    const now = new Date();
+    const conversation: Conversation = {
+      ...conv,
+      id,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.conversations.set(id, conversation);
+    return conversation;
+  }
+
+  async updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined> {
+    const conv = this.conversations.get(id);
+    if (!conv) return undefined;
+    const updated: Conversation = { ...conv, ...updates, id, updatedAt: new Date() };
+    this.conversations.set(id, updated);
+    return updated;
+  }
+
+  async deleteConversation(id: string): Promise<boolean> {
+    // Also delete messages
+    const msgEntries = Array.from(this.conversationMessages.entries());
+    for (const [msgId, msg] of msgEntries) {
+      if (msg.conversationId === id) {
+        this.conversationMessages.delete(msgId);
+      }
+    }
+    return this.conversations.delete(id);
+  }
+
+  // Conversation Messages
+  async getConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+    return Array.from(this.conversationMessages.values())
+      .filter(m => m.conversationId === conversationId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
+  async addConversationMessage(msg: InsertConversationMessage): Promise<ConversationMessage> {
+    const id = randomUUID();
+    const message: ConversationMessage = {
+      ...msg,
+      id,
+      createdAt: new Date(),
+    };
+    this.conversationMessages.set(id, message);
+    // Update conversation timestamp
+    const conv = this.conversations.get(msg.conversationId);
+    if (conv) {
+      conv.updatedAt = new Date();
+      this.conversations.set(conv.id, conv);
+    }
+    return message;
+  }
+
+  // Knowledge Base Documents
+  private async initializeSampleKBDocuments() {
+    const sampleDocs: InsertKBDocument[] = [
+      {
+        title: "VPN Connection Troubleshooting Guide",
+        content: `# VPN Connection Issues
+
+## Common Problems and Solutions
+
+### Issue: VPN Disconnects Frequently
+1. Check your internet connection stability
+2. Update VPN client to the latest version
+3. Try switching between TCP and UDP protocols
+4. Disable any conflicting firewall rules
+5. Contact IT if issues persist after 3 attempts
+
+### Issue: Cannot Connect to VPN
+1. Verify your credentials are correct
+2. Ensure you're not on a restricted network
+3. Check if the VPN server is reachable
+4. Clear cached credentials and try again
+
+### When to Escalate
+- If you've tried all steps above
+- If you see error codes starting with "500"
+- If multiple users are affected`,
+        category: "network",
+        tags: ["vpn", "network", "connectivity", "remote-work"],
+        createdBy: null,
+        updatedBy: null,
+      },
+      {
+        title: "Email Configuration for Mobile Devices",
+        content: `# Email Setup Guide
+
+## iOS Devices
+1. Go to Settings > Mail > Accounts
+2. Tap "Add Account" > Microsoft Exchange
+3. Enter your work email address
+4. Use autodiscover or manual settings
+5. Accept the security profile
+
+## Android Devices
+1. Open Gmail or Email app
+2. Add account > Exchange/Office 365
+3. Enter your credentials
+4. Allow device management if prompted
+
+## Common Issues
+- Password sync: Change password in Outlook first
+- Certificate errors: Install company root certificate
+- Sync issues: Check server settings match IT specs`,
+        category: "software",
+        tags: ["email", "mobile", "outlook", "configuration"],
+        createdBy: null,
+        updatedBy: null,
+      },
+      {
+        title: "Password Reset Procedures",
+        content: `# Password Reset Guide
+
+## Self-Service Reset
+1. Go to password.company.com
+2. Enter your username
+3. Answer security questions
+4. Create new password following policy
+
+## Password Requirements
+- Minimum 12 characters
+- Mix of upper/lowercase letters
+- At least one number
+- At least one special character
+- Cannot reuse last 10 passwords
+
+## If Self-Service Fails
+Contact IT Help Desk:
+- Phone: 555-HELP
+- Email: helpdesk@company.com
+- Portal: support.company.com`,
+        category: "security",
+        tags: ["password", "security", "authentication", "self-service"],
+        createdBy: null,
+        updatedBy: null,
+      },
+    ];
+
+    for (const doc of sampleDocs) {
+      await this.createKBDocument(doc);
+    }
+  }
+
+  async getKBDocuments(): Promise<KBDocument[]> {
+    return Array.from(this.kbDocuments.values()).sort((a, b) => 
+      b.updatedAt.getTime() - a.updatedAt.getTime()
+    );
+  }
+
+  async getKBDocument(id: string): Promise<KBDocument | undefined> {
+    return this.kbDocuments.get(id);
+  }
+
+  async createKBDocument(doc: InsertKBDocument): Promise<KBDocument> {
+    const id = randomUUID();
+    const now = new Date();
+    const document: KBDocument = {
+      ...doc,
+      id,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+    };
+    this.kbDocuments.set(id, document);
+    return document;
+  }
+
+  async updateKBDocument(id: string, updates: Partial<KBDocument>): Promise<KBDocument | undefined> {
+    const doc = this.kbDocuments.get(id);
+    if (!doc) return undefined;
+    const updated: KBDocument = {
+      ...doc,
+      ...updates,
+      id,
+      updatedAt: new Date(),
+      version: doc.version + 1,
+    };
+    this.kbDocuments.set(id, updated);
+    return updated;
+  }
+
+  async deleteKBDocument(id: string): Promise<boolean> {
+    await this.deleteKBChunksForDocument(id);
+    return this.kbDocuments.delete(id);
+  }
+
+  // Knowledge Base Chunks
+  async getKBChunks(documentId: string): Promise<KBChunk[]> {
+    return Array.from(this.kbChunks.values())
+      .filter(c => c.documentId === documentId)
+      .sort((a, b) => a.chunkIndex - b.chunkIndex);
+  }
+
+  async getAllKBChunks(): Promise<KBChunk[]> {
+    return Array.from(this.kbChunks.values());
+  }
+
+  async createKBChunk(chunk: InsertKBChunk): Promise<KBChunk> {
+    const id = randomUUID();
+    const kbChunk: KBChunk = {
+      ...chunk,
+      id,
+      createdAt: new Date(),
+    };
+    this.kbChunks.set(id, kbChunk);
+    return kbChunk;
+  }
+
+  async deleteKBChunksForDocument(documentId: string): Promise<void> {
+    const chunkEntries = Array.from(this.kbChunks.entries());
+    for (const [id, chunk] of chunkEntries) {
+      if (chunk.documentId === documentId) {
+        this.kbChunks.delete(id);
+      }
+    }
+  }
+
+  // ML Training Examples
+  async getMLTrainingExamples(): Promise<MLTrainingExample[]> {
+    return Array.from(this.mlTrainingExamples.values()).sort((a, b) => 
+      b.createdAt.getTime() - a.createdAt.getTime()
+    );
+  }
+
+  async createMLTrainingExample(example: InsertMLTrainingExample): Promise<MLTrainingExample> {
+    const id = randomUUID();
+    const trainingExample: MLTrainingExample = {
+      ...example,
+      id,
+      createdAt: new Date(),
+    };
+    this.mlTrainingExamples.set(id, trainingExample);
+    return trainingExample;
+  }
+
+  // ML Model Versions
+  async getMLModelVersions(): Promise<MLModelVersion[]> {
+    return Array.from(this.mlModelVersions.values()).sort((a, b) => b.version - a.version);
+  }
+
+  async getActiveMLModel(): Promise<MLModelVersion | undefined> {
+    return Array.from(this.mlModelVersions.values()).find(m => m.isActive);
+  }
+
+  async createMLModelVersion(model: InsertMLModelVersion): Promise<MLModelVersion> {
+    const id = randomUUID();
+    const versions = await this.getMLModelVersions();
+    const nextVersion = versions.length > 0 ? Math.max(...versions.map(v => v.version)) + 1 : 1;
+    const modelVersion: MLModelVersion = {
+      ...model,
+      id,
+      version: nextVersion,
+      trainedAt: new Date(),
+    };
+    this.mlModelVersions.set(id, modelVersion);
+    return modelVersion;
+  }
+
+  async setActiveMLModel(id: string): Promise<void> {
+    const modelEntries = Array.from(this.mlModelVersions.entries());
+    for (const [modelId, model] of modelEntries) {
+      model.isActive = modelId === id;
+      this.mlModelVersions.set(modelId, model);
+    }
+  }
+
+  // Analytics Events
+  async getAnalyticsEvents(startDate?: Date, endDate?: Date): Promise<AnalyticsEvent[]> {
+    let events = Array.from(this.analyticsEvents.values());
+    if (startDate) {
+      events = events.filter(e => e.createdAt >= startDate);
+    }
+    if (endDate) {
+      events = events.filter(e => e.createdAt <= endDate);
+    }
+    return events.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  async createAnalyticsEvent(event: InsertAnalyticsEvent): Promise<AnalyticsEvent> {
+    const id = randomUUID();
+    const analyticsEvent: AnalyticsEvent = {
+      ...event,
+      id,
+      createdAt: new Date(),
+    };
+    this.analyticsEvents.set(id, analyticsEvent);
+    return analyticsEvent;
   }
 }
 

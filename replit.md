@@ -2,7 +2,7 @@
 
 ## Overview
 
-Smart IT Copilot is an AI-powered IT support ticket management system with ServiceNow integration. It helps IT teams manage support tickets efficiently with intelligent categorization, priority prediction, and resolution suggestions. The application features a dashboard for ticket statistics, CRUD operations for support tickets, AI-powered analysis and troubleshooting chat, and bidirectional ServiceNow incident synchronization.
+Smart IT Copilot is an AI-powered IT support ticket management system with ServiceNow integration. It helps IT teams manage support tickets efficiently with intelligent categorization, priority prediction, and resolution suggestions. The application features a dashboard for ticket statistics, CRUD operations for support tickets, AI-powered analysis and troubleshooting chat, bidirectional ServiceNow incident synchronization, knowledge base management, user management with role-based access, ML-based triage with feedback loop, and comprehensive analytics.
 
 ## User Preferences
 
@@ -33,9 +33,24 @@ Preferred communication style: Simple, everyday language.
 - **Migrations**: Output to `./migrations` directory via `npm run db:push`
 
 ### Key Data Models
-- **Users**: Basic user authentication with username, password, email, role
+- **Users**: Basic user authentication with username, password, email, role (admin/agent/end_user)
 - **Tickets**: Support tickets with subject, description, status, priority, category, AI suggestions, and ServiceNow sync fields
-- **Conversations/Messages**: Chat storage for AI troubleshooting sessions
+- **Conversations/Messages**: Chat storage for AI troubleshooting sessions with deflection tracking
+- **KBDocuments/KBChunks**: Knowledge base articles with version control and tag support
+- **MLTrainingExamples/MLModels**: ML training data and model versioning with accuracy metrics
+- **AnalyticsEvents**: Event tracking for chat interactions, deflections, and ticket lifecycle
+
+### Application Pages
+- `/` - Dashboard with ticket statistics
+- `/copilot` - Global AI chat for pre-ticket troubleshooting
+- `/tickets` - Ticket list and management
+- `/tickets/:id` - Ticket detail with AI assistant
+- `/servicenow` - ServiceNow integration management
+- `/analytics` - AI insights, deflection metrics, and ROI tracking
+- `/knowledge-base` - Admin knowledge base management
+- `/users` - User management (Admin only)
+- `/settings` - User preferences
+- `/help` - Help documentation
 
 ### External Integrations
 - **ServiceNow**: Client in `server/servicenow-client.ts` supports both Basic and OAuth authentication for pulling incidents, creating incidents from tickets, and syncing status updates
