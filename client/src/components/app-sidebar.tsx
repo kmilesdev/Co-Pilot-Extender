@@ -86,11 +86,9 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-sidebar-primary">
-            <Bot className="h-6 w-6 text-sidebar-primary-foreground" />
-          </div>
+          <img src="/favicon.png" alt="Extender Copilot" className="h-10 w-10 rounded-md" />
           <div className="flex flex-col">
-            <span className="text-sm font-semibold text-sidebar-foreground">Smart IT</span>
+            <span className="text-sm font-semibold text-sidebar-foreground">Extender</span>
             <span className="text-xs text-sidebar-foreground/70">Copilot</span>
           </div>
         </div>

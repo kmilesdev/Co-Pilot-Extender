@@ -149,11 +149,11 @@ export default function HelpPage() {
         <div className="flex items-center justify-center gap-3">
           <HelpCircle className="h-10 w-10 text-primary" />
           <h1 className="text-3xl font-bold" data-testid="text-help-title">
-            Smart IT Copilot Help Center
+            Extender Copilot Help Center
           </h1>
         </div>
         <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-          Everything you need to know about using Smart IT Copilot to manage IT
+          Everything you need to know about using Extender Copilot to manage IT
           support tickets efficiently with AI-powered assistance.
         </p>
       </div>
@@ -351,7 +351,7 @@ export default function HelpPage() {
       </Card>
 
       <div className="text-center text-sm text-muted-foreground">
-        <p>Smart IT Copilot v1.0 | Last updated: January 2026</p>
+        <p>Extender Copilot v1.0 | Last updated: January 2026</p>
       </div>
     </div>
   );

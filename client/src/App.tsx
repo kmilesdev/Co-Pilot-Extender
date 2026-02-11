@@ -47,7 +47,7 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider defaultTheme="light" storageKey="smart-it-copilot-theme">
+      <ThemeProvider defaultTheme="light" storageKey="extender-copilot-theme">
         <TooltipProvider>
           <SidebarProvider style={style as React.CSSProperties}>
             <div className="flex h-screen w-full">
