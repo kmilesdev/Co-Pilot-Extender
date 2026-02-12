@@ -4,29 +4,27 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { MessageCircle, Send, Loader2, Bot, User, Sparkles, Paperclip, X, FileText, Plus, Trash2, CheckCircle } from "lucide-react";
+import { MessageCircle, Send, Loader2, Bot, User, Sparkles, Plus, CheckCircle, HelpCircle, Wrench } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { ChatMessage, Conversation } from "@shared/schema";
+import type { ChatMessage, Conversation, StructuredAIResponse } from "@shared/schema";
 
-interface Attachment {
+interface DisplayMessage {
   id: string;
-  name: string;
-  type: string;
-  dataUrl: string;
-  size: number;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+  structured?: StructuredAIResponse;
 }
 
 export default function CopilotPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [showDeflectionPrompt, setShowDeflectionPrompt] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: conversations = [] } = useQuery<Conversation[]>({
     queryKey: ["/api/conversations"],
@@ -44,6 +42,7 @@ export default function CopilotPage() {
     onSuccess: (data) => {
       setCurrentConversationId(data.id);
       setMessages([]);
+      setShowDeflectionPrompt(false);
       queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
     },
   });
@@ -74,103 +73,34 @@ export default function CopilotPage() {
     }
   }, []);
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+  const sendMessage = async (overrideMessage?: string) => {
+    const messageContent = overrideMessage || input.trim();
+    if (!messageContent || isLoading) return;
 
-    const maxSize = 10 * 1024 * 1024;
-    const allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp", "text/plain"];
-
-    for (const file of Array.from(files)) {
-      if (file.size > maxSize) {
-        alert(`File "${file.name}" is too large. Maximum size is 10MB.`);
-        continue;
-      }
-
-      if (!allowedTypes.includes(file.type)) {
-        alert(`File type "${file.type}" is not supported. Please use images (JPEG, PNG, GIF, WebP) or text files.`);
-        continue;
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        setAttachments((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            name: file.name,
-            type: file.type,
-            dataUrl,
-            size: file.size,
-          },
-        ]);
-      };
-      reader.readAsDataURL(file);
-    }
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  };
-
-  const removeAttachment = (id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-  };
-
-  const sendMessage = async () => {
-    if ((!input.trim() && attachments.length === 0) || isLoading) return;
-
-    const currentAttachments = [...attachments];
-    const messageContent = input.trim();
-    
-    const userMessage: ChatMessage = {
+    const userMessage: DisplayMessage = {
       id: crypto.randomUUID(),
       role: "user",
-      content: messageContent || (currentAttachments.length > 0 ? `[Attached ${currentAttachments.length} file(s)]` : ""),
+      content: messageContent,
       timestamp: new Date(),
-      attachments: currentAttachments.map(a => ({ name: a.name, type: a.type, dataUrl: a.dataUrl })),
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
-    setAttachments([]);
     setIsLoading(true);
-
-    const assistantMessage: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content: "",
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, assistantMessage]);
 
     try {
       const history = messages.map((m) => ({
         role: m.role,
         content: m.content,
-        attachments: m.attachments,
       }));
 
       const response = await fetch("/api/copilot/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          message: messageContent, 
+        body: JSON.stringify({
+          message: messageContent,
           history,
           conversationId: currentConversationId,
-          attachments: currentAttachments.map(a => ({
-            name: a.name,
-            type: a.type,
-            dataUrl: a.dataUrl,
-          })),
         }),
       });
 
@@ -178,62 +108,36 @@ export default function CopilotPage() {
         throw new Error("Failed to send message");
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
+      const data = await response.json();
 
-      const decoder = new TextDecoder();
+      if (!currentConversationId && data.conversationId) {
+        setCurrentConversationId(data.conversationId);
+        queryClient.invalidateQueries({ queryKey: ["/api/conversations"] });
+      }
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      const structured: StructuredAIResponse | undefined = data.structured;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
+      const assistantMessage: DisplayMessage = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: structured?.message || "I couldn't process that. Please try again.",
+        timestamp: new Date(),
+        structured,
+      };
 
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.content) {
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const lastMsg = updated[updated.length - 1];
-                  if (lastMsg?.role === "assistant") {
-                    lastMsg.content += data.content;
-                  }
-                  return updated;
-                });
-              }
-              if (data.done) {
-                // Show deflection prompt after conversation
-                if (messages.length >= 2) {
-                  setShowDeflectionPrompt(true);
-                }
-              }
-              if (data.error) {
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  const lastMsg = updated[updated.length - 1];
-                  if (lastMsg?.role === "assistant") {
-                    lastMsg.content = "I'm sorry, something went wrong. Please try again.";
-                  }
-                  return updated;
-                });
-              }
-            } catch (e) {
-            }
-          }
-        }
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      if (structured?.phase === "DIAGNOSE" && messages.length >= 3) {
+        setShowDeflectionPrompt(true);
       }
     } catch (error) {
-      setMessages((prev) => {
-        const updated = [...prev];
-        const lastMsg = updated[updated.length - 1];
-        if (lastMsg?.role === "assistant" && !lastMsg.content) {
-          lastMsg.content = "I'm sorry, I couldn't process your request. Please try again.";
-        }
-        return updated;
-      });
+      const errorMessage: DisplayMessage = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "I'm sorry, I couldn't process your request. Please try again.",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
@@ -248,6 +152,11 @@ export default function CopilotPage() {
 
   const startNewChat = () => {
     createConversation.mutate();
+  };
+
+  const handleQuickReply = (question: string) => {
+    setInput(question);
+    inputRef.current?.focus();
   };
 
   return (
@@ -311,32 +220,31 @@ export default function CopilotPage() {
                 <Bot className="h-16 w-16 mx-auto mb-4 text-primary/40" />
                 <h2 className="text-xl font-semibold mb-2 text-foreground">How can I help you today?</h2>
                 <p className="text-sm mb-6">
-                  Describe your IT issue and I'll guide you through troubleshooting steps.
-                  Upload screenshots or error logs for better assistance.
+                  Describe your IT issue and I'll ask a couple of quick questions, then guide you through a fix.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-lg mx-auto">
-                  <Card className="cursor-pointer hover-elevate" onClick={() => setInput("My VPN keeps disconnecting when working from home")}>
+                  <Card className="cursor-pointer hover-elevate" onClick={() => sendMessage("My VPN keeps disconnecting when working from home")}>
                     <CardContent className="p-4 text-left">
                       <p className="text-sm font-medium">VPN Issues</p>
                       <p className="text-xs text-muted-foreground">Connection drops or slow speeds</p>
                     </CardContent>
                   </Card>
-                  <Card className="cursor-pointer hover-elevate" onClick={() => setInput("I can't access my email on my phone")}>
+                  <Card className="cursor-pointer hover-elevate" onClick={() => sendMessage("I can't access my email on my phone")}>
                     <CardContent className="p-4 text-left">
                       <p className="text-sm font-medium">Email Problems</p>
                       <p className="text-xs text-muted-foreground">Can't send, receive, or sync</p>
                     </CardContent>
                   </Card>
-                  <Card className="cursor-pointer hover-elevate" onClick={() => setInput("My computer is running very slowly")}>
+                  <Card className="cursor-pointer hover-elevate" onClick={() => sendMessage("My computer is running very slowly")}>
                     <CardContent className="p-4 text-left">
                       <p className="text-sm font-medium">Slow Computer</p>
                       <p className="text-xs text-muted-foreground">Performance issues</p>
                     </CardContent>
                   </Card>
-                  <Card className="cursor-pointer hover-elevate" onClick={() => setInput("I think I received a phishing email")}>
+                  <Card className="cursor-pointer hover-elevate" onClick={() => sendMessage("Computer screen glitching")}>
                     <CardContent className="p-4 text-left">
-                      <p className="text-sm font-medium">Security Concern</p>
-                      <p className="text-xs text-muted-foreground">Suspicious activity</p>
+                      <p className="text-sm font-medium">Display Issues</p>
+                      <p className="text-xs text-muted-foreground">Screen flickering or glitching</p>
                     </CardContent>
                   </Card>
                 </div>
@@ -361,26 +269,16 @@ export default function CopilotPage() {
                     }`}
                     data-testid={`chat-message-${msg.role}`}
                   >
-                    {msg.attachments && msg.attachments.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {msg.attachments.map((att, idx) => (
-                          att.type.startsWith("image/") ? (
-                            <img
-                              key={idx}
-                              src={att.dataUrl}
-                              alt={att.name}
-                              className="max-w-[150px] max-h-[100px] rounded object-cover"
-                            />
-                          ) : (
-                            <div key={idx} className="flex items-center gap-1 text-xs bg-background/20 rounded px-2 py-1">
-                              <FileText className="h-3 w-3" />
-                              {att.name}
-                            </div>
-                          )
-                        ))}
-                      </div>
+                    {msg.role === "assistant" && msg.structured ? (
+                      <StructuredMessageView
+                        structured={msg.structured}
+                        onQuickReply={handleQuickReply}
+                      />
+                    ) : (
+                      <p className="text-sm whitespace-pre-wrap">
+                        {msg.content || (isLoading ? "..." : "")}
+                      </p>
                     )}
-                    <p className="text-sm whitespace-pre-wrap">{msg.content || (isLoading ? "..." : "")}</p>
                   </div>
                   {msg.role === "user" && (
                     <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary flex items-center justify-center">
@@ -389,9 +287,18 @@ export default function CopilotPage() {
                   )}
                 </div>
               ))}
+              {isLoading && (
+                <div className="flex gap-3 justify-start">
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Bot className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="bg-muted rounded-lg px-4 py-3">
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Deflection Prompt */}
             {showDeflectionPrompt && (
               <Card className="mt-6 border-green-500/30 bg-green-500/5">
                 <CardContent className="p-4">
@@ -424,56 +331,7 @@ export default function CopilotPage() {
         {/* Input Area */}
         <div className="p-4 border-t bg-background">
           <div className="max-w-3xl mx-auto">
-            {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-3 p-2 bg-muted/50 rounded-lg">
-                {attachments.map((att) => (
-                  <div
-                    key={att.id}
-                    className="relative group flex items-center gap-2 bg-background rounded px-2 py-1 text-sm"
-                    data-testid={`attachment-preview-${att.id}`}
-                  >
-                    {att.type.startsWith("image/") ? (
-                      <img
-                        src={att.dataUrl}
-                        alt={att.name}
-                        className="w-8 h-8 object-cover rounded"
-                      />
-                    ) : (
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                    )}
-                    <span className="max-w-[100px] truncate text-xs">{att.name}</span>
-                    <span className="text-xs text-muted-foreground">({formatFileSize(att.size)})</span>
-                    <button
-                      onClick={() => removeAttachment(att.id)}
-                      className="p-0.5 hover:bg-destructive/20 rounded"
-                      data-testid={`button-remove-attachment-${att.id}`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
             <div className="flex gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,.txt"
-                multiple
-                onChange={handleFileSelect}
-                className="hidden"
-                data-testid="input-file-upload"
-              />
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading}
-                title="Attach files or images"
-                data-testid="button-attach-file"
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
               <Textarea
                 ref={inputRef}
                 value={input}
@@ -485,8 +343,8 @@ export default function CopilotPage() {
                 data-testid="input-chat-message"
               />
               <Button
-                onClick={sendMessage}
-                disabled={(!input.trim() && attachments.length === 0) || isLoading}
+                onClick={() => sendMessage()}
+                disabled={!input.trim() || isLoading}
                 size="icon"
                 data-testid="button-send-message"
               >
@@ -498,11 +356,73 @@ export default function CopilotPage() {
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mt-2 text-center">
-              Press Enter to send, Shift+Enter for new line. Attach screenshots for better help.
+              Press Enter to send, Shift+Enter for new line
             </p>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function StructuredMessageView({
+  structured,
+  onQuickReply,
+}: {
+  structured: StructuredAIResponse;
+  onQuickReply: (text: string) => void;
+}) {
+  return (
+    <div className="space-y-3" data-testid="structured-response">
+      <p className="text-sm whitespace-pre-wrap">{structured.message}</p>
+
+      {structured.questions && structured.questions.length > 0 && (
+        <div className="space-y-2" data-testid="questions-section">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <HelpCircle className="h-3.5 w-3.5" />
+            Quick replies
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {structured.questions.map((q, idx) => (
+              <Button
+                key={idx}
+                variant="outline"
+                size="sm"
+                className="text-xs whitespace-normal text-left"
+                onClick={() => onQuickReply(q)}
+                data-testid={`button-quick-reply-${idx}`}
+              >
+                {q}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {structured.steps && structured.steps.length > 0 && (
+        <div className="space-y-1.5" data-testid="steps-section">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+            <Wrench className="h-3.5 w-3.5" />
+            Try these steps
+          </div>
+          <ol className="list-decimal list-inside space-y-1 text-sm">
+            {structured.steps.map((step, idx) => (
+              <li key={idx} data-testid={`text-step-${idx}`}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {structured.phase === "COLLECT_INFO" && (
+        <Badge variant="secondary" className="text-xs" data-testid="badge-phase-info">
+          Gathering info
+        </Badge>
+      )}
+      {structured.phase === "DIAGNOSE" && (
+        <Badge variant="secondary" className="text-xs" data-testid="badge-phase-diagnose">
+          Troubleshooting
+        </Badge>
+      )}
     </div>
   );
 }

@@ -154,6 +154,28 @@ export interface TroubleshootingRequest {
   history: { role: "user" | "assistant"; content: string }[];
 }
 
+// Two-phase chat flow types
+export const chatPhaseValues = ["COLLECT_INFO", "DIAGNOSE"] as const;
+export type ChatPhase = typeof chatPhaseValues[number];
+
+export const chatNextActionValues = ["WAIT_FOR_USER", "APPLY_STEPS"] as const;
+export type ChatNextAction = typeof chatNextActionValues[number];
+
+export interface CollectedInfo {
+  os?: string;
+  deviceType?: string;
+  symptom?: string;
+  additionalContext?: string;
+}
+
+export interface StructuredAIResponse {
+  phase: ChatPhase;
+  message: string;
+  questions?: string[];
+  steps?: string[];
+  next_action: ChatNextAction;
+}
+
 // Persistent Conversation/Chat types
 export interface Conversation {
   id: string;
@@ -164,6 +186,8 @@ export interface Conversation {
   updatedAt: Date;
   resolved: boolean;
   deflected: boolean;
+  phase: ChatPhase;
+  collectedInfo: CollectedInfo | null;
 }
 
 export interface ConversationMessage {
@@ -173,6 +197,7 @@ export interface ConversationMessage {
   content: string;
   attachments: ChatAttachment[];
   createdAt: Date;
+  structuredResponse?: StructuredAIResponse;
 }
 
 export type InsertConversation = Omit<Conversation, "id" | "createdAt" | "updatedAt">;

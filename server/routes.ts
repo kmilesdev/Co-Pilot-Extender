@@ -3,8 +3,10 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { snClient } from "./servicenow-client";
 import { ticketFormSchema } from "@shared/schema";
+import type { ChatPhase } from "@shared/schema";
 import { z } from "zod";
 import OpenAI from "openai";
+import { getTwoPhaseResponse, hasEnoughInfo, extractInfo } from "./ai-chat-helper";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -324,6 +326,7 @@ export async function registerRoutes(
   // AI Troubleshooting Chat
   // =====================
 
+  // Ticket-specific AI chat — two-phase structured flow
   app.post("/api/tickets/:id/chat", async (req, res) => {
     try {
       const ticket = await storage.getTicket(req.params.id);
@@ -331,113 +334,81 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Ticket not found" });
       }
 
-      const { message, history = [], attachments = [] } = req.body;
-      if (!message && attachments.length === 0) {
-        return res.status(400).json({ error: "Message or attachments required" });
+      const { message, history = [] } = req.body;
+      if (!message) {
+        return res.status(400).json({ error: "Message required" });
       }
 
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
+      // Find or create a conversation for this ticket
+      let conversation = await storage.getConversationByTicketId(ticket.id);
+      if (!conversation) {
+        conversation = await storage.createConversation({
+          userId: null,
+          ticketId: ticket.id,
+          title: ticket.subject.slice(0, 60),
+          resolved: false,
+          deflected: false,
+          phase: "COLLECT_INFO",
+          collectedInfo: null,
+        });
+      }
 
-      const systemPrompt = `You are a friendly and helpful IT support assistant called Smart IT Copilot. Your job is to help users troubleshoot their IT issues step by step.
+      // Phase transition logic
+      let currentPhase: ChatPhase = conversation.phase;
+      let collectedInfo = conversation.collectedInfo;
 
-TICKET CONTEXT:
-- Subject: ${ticket.subject}
-- Description: ${ticket.description}
-- Category: ${ticket.category || "Not specified"}
-- Priority: ${ticket.priority}
-- Status: ${ticket.status}
-${ticket.aiSuggestions ? `- Initial AI Suggestions: ${ticket.aiSuggestions}` : ""}
+      collectedInfo = extractInfo(collectedInfo, message);
 
-INSTRUCTIONS:
-1. Provide clear, simple, step-by-step instructions that anyone can follow
-2. Use numbered steps for troubleshooting procedures
-3. Ask follow-up questions if you need more information
-4. Use simple, non-technical language whenever possible
-5. If a step doesn't work, offer alternative solutions
-6. Be encouraging and patient
-7. Keep responses concise but thorough
+      if (currentPhase === "COLLECT_INFO" && history.length >= 2 && hasEnoughInfo(collectedInfo, message)) {
+        currentPhase = "DIAGNOSE";
+      }
 
-Remember: The user may not be technical, so explain things in everyday terms.
-${attachments.length > 0 ? "\nThe user has attached files/images. Please analyze them carefully to help troubleshoot their issue." : ""}`;
+      const chatHistory = history.map((msg: { role: string; content: string }) => ({
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+      }));
 
-      type MessageContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
-      
-      const buildMessageContent = (text: string, msgAttachments?: { name: string; type: string; dataUrl: string }[]): MessageContent => {
-        if (!msgAttachments || msgAttachments.length === 0) {
-          return text || "";
+      const aiResponse = await getTwoPhaseResponse(
+        currentPhase,
+        collectedInfo,
+        chatHistory,
+        message,
+        {
+          subject: ticket.subject,
+          description: ticket.description,
+          category: ticket.category || undefined,
+          priority: ticket.priority,
         }
-        
-        const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [];
-        
-        if (text) {
-          content.push({ type: "text", text });
-        }
-        
-        for (const att of msgAttachments) {
-          if (att.type.startsWith("image/")) {
-            content.push({
-              type: "image_url",
-              image_url: { url: att.dataUrl },
-            });
-          } else {
-            // For non-image files, describe them in text
-            const base64Content = att.dataUrl.split(",")[1] || "";
-            try {
-              const decoded = Buffer.from(base64Content, "base64").toString("utf-8");
-              content.push({
-                type: "text",
-                text: `[File: ${att.name}]\n${decoded.slice(0, 5000)}${decoded.length > 5000 ? "...(truncated)" : ""}`,
-              });
-            } catch {
-              content.push({
-                type: "text",
-                text: `[File: ${att.name}] (binary file, cannot display content)`,
-              });
-            }
-          }
-        }
-        
-        return content.length > 0 ? content : text || "";
-      };
+      );
 
-      const chatMessages: any[] = [
-        { role: "system", content: systemPrompt },
-        ...history.map((msg: { role: string; content: string; attachments?: { name: string; type: string; dataUrl: string }[] }) => ({
-          role: msg.role as "user" | "assistant",
-          content: buildMessageContent(msg.content, msg.attachments),
-        })),
-        { role: "user", content: buildMessageContent(message || "", attachments) },
-      ];
-
-      const stream = await openai.chat.completions.create({
-        model: "gpt-5-mini",
-        messages: chatMessages as any,
-        stream: true,
-        max_completion_tokens: 2048,
+      // Persist phase + collectedInfo
+      await storage.updateConversation(conversation.id, {
+        phase: currentPhase,
+        collectedInfo,
       });
 
-      let fullResponse = "";
+      // Persist messages
+      await storage.addConversationMessage({
+        conversationId: conversation.id,
+        role: "user",
+        content: message,
+        attachments: [],
+      });
+      await storage.addConversationMessage({
+        conversationId: conversation.id,
+        role: "assistant",
+        content: aiResponse.message,
+        attachments: [],
+        structuredResponse: aiResponse,
+      });
 
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        if (content) {
-          fullResponse += content;
-          res.write(`data: ${JSON.stringify({ content })}\n\n`);
-        }
-      }
-
-      res.write(`data: ${JSON.stringify({ done: true, fullResponse })}\n\n`);
-      res.end();
+      res.json({
+        conversationId: conversation.id,
+        structured: aiResponse,
+      });
     } catch (error) {
       console.error("Error in AI chat:", error);
-      if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ error: "AI chat failed. Please try again." })}\n\n`);
-        res.end();
-      } else {
-        res.status(500).json({ error: "Failed to process chat message" });
-      }
+      res.status(500).json({ error: "Failed to process chat message" });
     }
   });
 
@@ -693,6 +664,8 @@ ${attachments.length > 0 ? "\nThe user has attached files/images. Please analyze
         title: title || "New Conversation",
         resolved: false,
         deflected: false,
+        phase: "COLLECT_INFO",
+        collectedInfo: null,
       });
       
       await storage.createAnalyticsEvent({
@@ -778,129 +751,98 @@ ${attachments.length > 0 ? "\nThe user has attached files/images. Please analyze
     }
   });
 
-  // Global Copilot Chat (not tied to a ticket)
+  // Global Copilot Chat — two-phase structured flow
   app.post("/api/copilot/chat", async (req, res) => {
     try {
-      const { message, history = [], attachments = [], conversationId } = req.body;
-      if (!message && attachments.length === 0) {
-        return res.status(400).json({ error: "Message or attachments required" });
+      const { message, history = [], conversationId } = req.body;
+      if (!message) {
+        return res.status(400).json({ error: "Message required" });
       }
 
-      // Get KB documents for RAG
+      // Load or create conversation to track phase
+      let conversation = conversationId ? await storage.getConversation(conversationId) : null;
+      if (!conversation) {
+        conversation = await storage.createConversation({
+          userId: null,
+          ticketId: null,
+          title: message.slice(0, 60),
+          resolved: false,
+          deflected: false,
+          phase: "COLLECT_INFO",
+          collectedInfo: null,
+        });
+      }
+
+      // Phase transition logic: if we're in COLLECT_INFO and user has provided enough info, move to DIAGNOSE
+      let currentPhase: ChatPhase = conversation.phase;
+      let collectedInfo = conversation.collectedInfo;
+
+      // Extract info from the latest user message
+      collectedInfo = extractInfo(collectedInfo, message);
+
+      if (currentPhase === "COLLECT_INFO" && history.length >= 2 && hasEnoughInfo(collectedInfo, message)) {
+        currentPhase = "DIAGNOSE";
+      }
+
+      // Get KB context for RAG (limited to keep prompt short)
       const kbDocs = await storage.getKBDocuments();
-      const kbContext = kbDocs.slice(0, 5).map(doc => 
-        `[${doc.title}]\n${doc.content.slice(0, 500)}...`
-      ).join("\n\n");
+      const kbContext = kbDocs.slice(0, 3).map(doc =>
+        `[${doc.title}]: ${doc.content.slice(0, 200)}`
+      ).join("\n");
 
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
+      // Build plain-text history for the AI helper
+      const chatHistory = history.map((msg: { role: string; content: string }) => ({
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+      }));
 
-      const systemPrompt = `You are Smart IT Copilot, a friendly and expert IT support assistant. Your goal is to help users troubleshoot IT issues BEFORE they need to create a support ticket.
+      // Call the two-phase AI helper (non-streaming, structured JSON output)
+      const aiResponse = await getTwoPhaseResponse(
+        currentPhase,
+        collectedInfo,
+        chatHistory,
+        message,
+        { kbContext }
+      );
 
-RESPONSE FORMAT (Always follow this structure):
-1. **Summary**: Brief explanation of the likely issue
-2. **Steps to Try**: Numbered troubleshooting steps in simple language
-3. **If That Doesn't Work**: Alternative solutions
-4. **When to Escalate**: When to create a ticket or contact IT directly
-5. **Confidence**: Low/Medium/High + brief reason
-
-KNOWLEDGE BASE ARTICLES:
-${kbContext || "No articles loaded."}
-
-INSTRUCTIONS:
-- Use simple, everyday language (user may not be technical)
-- Provide clear, numbered steps
-- If you're uncertain, ask clarifying questions
-- Reference KB articles when relevant and cite sources
-- Be encouraging and patient
-- Keep responses concise but thorough
-${attachments.length > 0 ? "\nThe user has attached files/images. Analyze them to help troubleshoot." : ""}`;
-
-      type MessageContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
-      
-      const buildMessageContent = (text: string, msgAttachments?: { name: string; type: string; dataUrl: string }[]): MessageContent => {
-        if (!msgAttachments || msgAttachments.length === 0) {
-          return text || "";
-        }
-        
-        const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [];
-        
-        if (text) {
-          content.push({ type: "text", text });
-        }
-        
-        for (const att of msgAttachments) {
-          if (att.type.startsWith("image/")) {
-            content.push({
-              type: "image_url",
-              image_url: { url: att.dataUrl },
-            });
-          } else {
-            const base64Content = att.dataUrl.split(",")[1] || "";
-            try {
-              const decoded = Buffer.from(base64Content, "base64").toString("utf-8");
-              content.push({
-                type: "text",
-                text: `[File: ${att.name}]\n${decoded.slice(0, 5000)}${decoded.length > 5000 ? "...(truncated)" : ""}`,
-              });
-            } catch {
-              content.push({
-                type: "text",
-                text: `[File: ${att.name}] (binary file, cannot display content)`,
-              });
-            }
-          }
-        }
-        
-        return content.length > 0 ? content : text || "";
-      };
-
-      const chatMessages: any[] = [
-        { role: "system", content: systemPrompt },
-        ...history.map((msg: { role: string; content: string; attachments?: { name: string; type: string; dataUrl: string }[] }) => ({
-          role: msg.role as "user" | "assistant",
-          content: buildMessageContent(msg.content, msg.attachments),
-        })),
-        { role: "user", content: buildMessageContent(message || "", attachments) },
-      ];
-
-      const stream = await openai.chat.completions.create({
-        model: "gpt-5-mini",
-        messages: chatMessages as any,
-        stream: true,
-        max_completion_tokens: 2048,
+      // Persist phase + collectedInfo back to conversation
+      await storage.updateConversation(conversation.id, {
+        phase: currentPhase,
+        collectedInfo,
       });
 
-      let fullResponse = "";
-
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || "";
-        if (content) {
-          fullResponse += content;
-          res.write(`data: ${JSON.stringify({ content })}\n\n`);
-        }
-      }
+      // Persist messages
+      await storage.addConversationMessage({
+        conversationId: conversation.id,
+        role: "user",
+        content: message,
+        attachments: [],
+      });
+      await storage.addConversationMessage({
+        conversationId: conversation.id,
+        role: "assistant",
+        content: aiResponse.message,
+        attachments: [],
+        structuredResponse: aiResponse,
+      });
 
       // Track analytics
       await storage.createAnalyticsEvent({
         eventType: "chat_message",
         userId: null,
         ticketId: null,
-        conversationId: conversationId || null,
-        metadata: { messageLength: message?.length || 0, hasAttachments: attachments.length > 0 },
+        conversationId: conversation.id,
+        metadata: { phase: currentPhase, messageLength: message.length },
       });
 
-      res.write(`data: ${JSON.stringify({ done: true, fullResponse })}\n\n`);
-      res.end();
+      // Return structured response (non-streaming for structured output)
+      res.json({
+        conversationId: conversation.id,
+        structured: aiResponse,
+      });
     } catch (error) {
       console.error("Error in Copilot chat:", error);
-      if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ error: "Chat failed. Please try again." })}\n\n`);
-        res.end();
-      } else {
-        res.status(500).json({ error: "Failed to process chat message" });
-      }
+      res.status(500).json({ error: "Failed to process chat message" });
     }
   });
 

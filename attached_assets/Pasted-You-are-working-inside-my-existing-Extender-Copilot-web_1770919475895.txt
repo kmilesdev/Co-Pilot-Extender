@@ -1,0 +1,74 @@
+You are working inside my existing Extender Copilot web app (TypeScript). Everything works, but the AI responses are too long and overwhelm users. I need you to implement a STRICT two-phase chat flow so the AI asks a couple questions first, then waits, and ONLY after the user answers does it give a small set of steps.
+
+GOAL
+- Phase 1 (COLLECT_INFO): Ask max 2 clarifying questions, then STOP. No troubleshooting steps, no “while you answer…” checklists.
+- Phase 2 (DIAGNOSE): Give max 1–3 steps, then ask “Did that work?” and offer “Want next steps?”.
+- Keep every response short (under ~80 words), no long lists, no more than 3 bullets.
+
+REQUIREMENTS
+1) Add a “phase” state per ticket/chat thread:
+   - phase = "COLLECT_INFO" or "DIAGNOSE"
+   - default phase is "COLLECT_INFO" for new tickets
+   - store it in the database (preferred) OR in-memory as fallback (but DB is best)
+
+2) Update the AI service call to enforce structure:
+   - Use OpenAI Responses API (or current OpenAI client already in project)
+   - Use JSON schema / structured output so the model can only return:
+     {
+       phase: "COLLECT_INFO" | "DIAGNOSE",
+       message: string,
+       questions?: string[] (max 2),
+       steps?: string[] (max 3),
+       next_action: "WAIT_FOR_USER" | "APPLY_STEPS"
+     }
+   - The UI should render EITHER questions OR steps (never both in one message).
+   - Cap output: temperature ~0.2 and max tokens ~220.
+
+3) Phase transition logic:
+   - If ticket.phase is COLLECT_INFO:
+     - AI must respond with questions only and next_action="WAIT_FOR_USER"
+     - After user replies, update stored phase to DIAGNOSE if we have enough info.
+       “Enough info” = at least OS + device type OR the user provides clear context.
+   - If ticket.phase is DIAGNOSE:
+     - AI responds with steps only and next_action="APPLY_STEPS"
+     - After user confirms it didn’t work, AI provides next 1–3 steps (still DIAGNOSE)
+
+4) Update system prompt:
+   - In COLLECT_INFO: ask max 2 questions; do not give steps; end with a question; stop.
+   - In DIAGNOSE: provide max 3 steps; end with “Did that work?”; stop.
+   - Only show urgent safety warning if there is actual danger (smoke/sparks/burning smell/swollen battery/liquid).
+
+5) Update UI/UX:
+   - If the AI returns questions: show them as selectable quick-reply chips (optional) + also allow typed response.
+   - If the AI returns steps: show as a short numbered list (max 3).
+   - Keep the message concise.
+
+IMPLEMENTATION TASKS (DO THESE IN ORDER)
+A) Locate the backend route that handles AI replies (e.g. /api/chat, /api/tickets/:id/reply, etc).
+B) Add or modify the Ticket model/table to include `phase` (string enum) and `collectedInfo` (optional JSON) to store extracted details (OS, device type, symptom).
+C) Write a helper that:
+   - takes (ticket.phase, collectedInfo, latest user message)
+   - calls the AI with the strict system prompt + schema
+   - returns the structured JSON response
+D) Update the handler so it:
+   - loads the ticket + phase
+   - calls AI helper
+   - persists AI message + updates phase if appropriate
+   - returns the structured response to the frontend
+E) Update the frontend to render based on response:
+   - if questions exist -> render questions view
+   - else if steps exist -> render steps view
+   - else -> render message only (fallback)
+
+CODING GUIDELINES
+- Keep changes minimal and consistent with existing code style.
+- Add comments where phase logic is applied.
+- Ensure no breaking changes to current working flow.
+- If OpenAI keys are missing, read from env var already used in the project.
+- Provide a short summary of which files were changed and where to test.
+
+DELIVERABLE
+- After implementing, show me how to test with a sample ticket:
+  - User: "Computer screen glitching"
+  - AI should ONLY ask 2 questions and stop
+  - After user answers, AI gives 1–3 steps only

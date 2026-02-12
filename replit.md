@@ -38,6 +38,13 @@ Preferred communication style: Simple, everyday language.
 ### AI Integration
 - **Provider**: OpenAI API (via Replit AI Integrations)
 - **Environment Variables**: `AI_INTEGRATIONS_OPENAI_API_KEY` and `AI_INTEGRATIONS_OPENAI_BASE_URL`
+- **Two-Phase Chat Flow**: 
+  - Phase 1 (COLLECT_INFO): AI asks max 2 clarifying questions, then stops. No steps.
+  - Phase 2 (DIAGNOSE): AI provides max 1-3 troubleshooting steps, then asks "Did that work?"
+  - Phase tracked per Conversation (phase + collectedInfo fields)
+  - Structured JSON output enforced via `response_format: { type: "json_object" }` with server-side validation
+  - AI helper: `server/ai-chat-helper.ts` — getTwoPhaseResponse(), hasEnoughInfo(), extractInfo()
+  - Temperature: 0.2, max_completion_tokens: 220
 - **Features**: Ticket categorization/priority prediction, resolution suggestions, multi-turn conversational troubleshooting, knowledge base-augmented responses
 - **Audio/Voice**: Server-side speech-to-text and text-to-speech capabilities (`server/integrations/audio/`), client-side voice recording and streaming playback (`client/integrations/audio/`)
 - **Image Generation**: Available via `server/integrations/image/` using gpt-image-1 model
